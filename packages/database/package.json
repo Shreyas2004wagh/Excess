@@ -7,9 +7,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "db:generate": "dotenv -e ../../.env -- prisma generate",
+    "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
     "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
     "db:push": "dotenv -e ../../.env -- prisma db push",
     "db:validate": "dotenv -e ../../.env -- prisma validate",
+    "db:status": "dotenv -e ../../.env -- prisma migrate status",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
