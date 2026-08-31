@@ -31,9 +31,14 @@ cp .env.example .env
 corepack pnpm install
 docker compose up -d
 corepack pnpm db:generate
-corepack pnpm db:push
+corepack pnpm db:deploy
 corepack pnpm dev
 ```
+
+Run `corepack pnpm dlx clerk@latest init` from `apps/web` to link a Clerk
+development application. Clerk writes credentials to the ignored
+`apps/web/.env.local` file. Enable email/password and Google in the development
+instance before testing sign-in.
 
 The web application runs at `http://localhost:3000`. The API health endpoint is
 available at `http://localhost:4000/api/v1/health`.
@@ -45,6 +50,7 @@ corepack pnpm lint
 corepack pnpm typecheck
 corepack pnpm test
 corepack pnpm build
+corepack pnpm test:e2e
 ```
 
 ## Development order

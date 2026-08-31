@@ -11,10 +11,12 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "test:e2e": "pnpm --filter @excess/web test:e2e",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:generate": "pnpm --filter @excess/database db:generate",
+    "db:deploy": "pnpm --filter @excess/database db:deploy",
     "db:migrate": "pnpm --filter @excess/database db:migrate",
     "db:push": "pnpm --filter @excess/database db:push"
   },

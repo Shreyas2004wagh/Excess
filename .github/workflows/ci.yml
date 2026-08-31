@@ -13,7 +13,12 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+      E2E_CLERK_USER_EMAIL: ${{ secrets.E2E_CLERK_USER_EMAIL }}
 
     services:
       postgres:
@@ -56,12 +61,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Configure environment
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          touch apps/web/.env.local
 
       - name: Generate and validate database client
         run: |
           pnpm db:generate
           pnpm --filter @excess/database db:validate
+          pnpm db:deploy
 
       - name: Check formatting
         run: pnpm format:check
@@ -77,3 +85,9 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Install Playwright browser
+        run: pnpm --filter @excess/web exec playwright install --with-deps chromium
+
+      - name: Test authenticated dashboard
+        run: pnpm test:e2e
