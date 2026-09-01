@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+const optionalSecret = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 const environmentSchema = z
   .object({
     NODE_ENV: z
@@ -9,10 +14,13 @@ const environmentSchema = z
     WEB_ORIGIN: z.url().default('http://localhost:3000'),
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+    MARKET_DATA_PROVIDER: z.enum(['coinbase', 'mock']).default('coinbase'),
+    COINBASE_REST_URL: z.url().default('https://api.exchange.coinbase.com'),
+    COINBASE_WS_URL: z.url().default('wss://advanced-trade-ws.coinbase.com'),
     CLERK_SECRET_KEY: z.string().min(1),
-    CLERK_PUBLISHABLE_KEY: z.string().min(1).optional(),
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().min(1).optional(),
-    CLERK_WEBHOOK_SIGNING_SECRET: z.string().min(1).optional(),
+    CLERK_PUBLISHABLE_KEY: optionalSecret,
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: optionalSecret,
+    CLERK_WEBHOOK_SIGNING_SECRET: optionalSecret,
   })
   .superRefine((environment, context) => {
     if (
