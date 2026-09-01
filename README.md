@@ -16,7 +16,9 @@ sees portfolio profit and loss update in real time.
 - `packages/shared-types` — contracts shared by the browser and API
 
 PostgreSQL is authoritative for users, balances, orders, trades, positions, and
-the financial ledger. Redis will support market-price caching and WebSocket fan-out.
+the financial ledger. Coinbase supplies public BTC-USD candles and live ticker
+updates; Redis caches normalized snapshots before the NestJS WebSocket gateway
+fans them out to authenticated terminals.
 
 ## Requirements
 
@@ -43,6 +45,10 @@ instance before testing sign-in.
 The web application runs at `http://localhost:3000`. The API health endpoint is
 available at `http://localhost:4000/api/v1/health`.
 
+After signing in, open `http://localhost:3000/terminal` for the live BTC-USD
+five-minute candlestick chart. Set `MARKET_DATA_PROVIDER=mock` for deterministic
+development or end-to-end tests without an external feed.
+
 ## Quality checks
 
 ```bash
@@ -57,7 +63,7 @@ corepack pnpm test:e2e
 
 1. Foundation and local infrastructure
 2. Authentication and the $10,000 demo account
-3. Live BTC-USD market data and chart
+3. Live BTC-USD market data and chart — complete
 4. Atomic market-order execution
 5. Positions and real-time portfolio P/L
 6. Production hardening
