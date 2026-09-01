@@ -49,3 +49,62 @@ export interface LedgerPage {
   items: LedgerEntrySummary[];
   nextCursor: string | null;
 }
+
+export type MarketDataStatus = 'CONNECTING' | 'LIVE' | 'STALE' | 'OFFLINE';
+export type MarketDataSource = 'COINBASE' | 'SIMULATED';
+
+export interface MarketCandle {
+  time: number;
+  open: DecimalString;
+  high: DecimalString;
+  low: DecimalString;
+  close: DecimalString;
+  volume: DecimalString;
+}
+
+export interface MarketTicker {
+  symbol: string;
+  price: DecimalString;
+  bid: DecimalString;
+  ask: DecimalString;
+  change24h: DecimalString;
+  high24h: DecimalString;
+  low24h: DecimalString;
+  volume24h: DecimalString;
+  status: MarketDataStatus;
+  source: MarketDataSource;
+  updatedAt: string;
+}
+
+export interface MarketInstrumentSummary {
+  symbol: string;
+  displayName: string;
+  baseCurrency: string;
+  quoteCurrency: string;
+  pricePrecision: number;
+  quantityPrecision: number;
+  tickSize: DecimalString;
+  lotSize: DecimalString;
+  minimumQuantity: DecimalString;
+  status: 'ACTIVE' | 'HALTED' | 'DISABLED';
+  ticker: MarketTicker;
+}
+
+export interface CandleHistoryResponse {
+  symbol: string;
+  granularity: 300;
+  items: MarketCandle[];
+  source: MarketDataSource;
+  fetchedAt: string;
+}
+
+export type MarketStreamEvent =
+  | { event: 'market:ticker'; data: MarketTicker }
+  | {
+      event: 'market:candle';
+      data: { symbol: string; candle: MarketCandle };
+    }
+  | {
+      event: 'market:status';
+      data: { symbol: string; status: MarketDataStatus };
+    };
