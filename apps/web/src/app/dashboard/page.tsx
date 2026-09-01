@@ -86,15 +86,18 @@ export default async function DashboardPage() {
 
             <article className="rounded-3xl border border-[var(--border)] bg-[linear-gradient(145deg,#151d13,#10151d)] p-7 sm:p-9">
               <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--accent)]">
-                Next milestone
+                Market data
               </p>
               <h2 className="mt-5 text-2xl font-semibold">
-                Trading terminal coming next.
+                BTC-USD terminal is live.
               </h2>
               <p className="mt-3 leading-7 text-[var(--muted)]">
-                Live BTC-USD prices and candlestick charts will connect to this
-                account in the next phase.
+                Follow Coinbase prices and five-minute candles in real time.
+                Order entry remains safely disabled until the next milestone.
               </p>
+              <Link className="button button-primary mt-7" href="/terminal">
+                Open terminal
+              </Link>
             </article>
           </div>
 

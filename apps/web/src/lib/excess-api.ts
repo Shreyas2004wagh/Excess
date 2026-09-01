@@ -1,5 +1,7 @@
 import type {
+  CandleHistoryResponse,
   LedgerPage,
+  MarketInstrumentSummary,
   SessionBootstrapResponse,
 } from '@excess/shared-types';
 
@@ -61,4 +63,18 @@ export function bootstrapSession(token: string) {
 
 export function getLedger(token: string) {
   return request<LedgerPage>('/accounts/demo/ledger?limit=20', token);
+}
+
+export function getMarketInstrument(token: string, symbol = 'BTC-USD') {
+  return request<MarketInstrumentSummary>(
+    `/market-data/instruments/${symbol}`,
+    token,
+  );
+}
+
+export function getMarketCandles(token: string, symbol = 'BTC-USD') {
+  return request<CandleHistoryResponse>(
+    `/market-data/instruments/${symbol}/candles?granularity=300&limit=300`,
+    token,
+  );
 }
