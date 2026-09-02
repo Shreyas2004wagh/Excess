@@ -9,6 +9,7 @@ import { MarketDataModule } from './modules/market-data/market-data.module.js';
 import { RedisModule } from './modules/redis/redis.module.js';
 import { AccountsModule } from './modules/accounts/accounts.module.js';
 import { SessionModule } from './modules/session/session.module.js';
+import { TradingModule } from './modules/trading/trading.module.js';
 import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
 
 @Module({
@@ -26,6 +27,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
     AccountsModule,
     WebhooksModule,
     MarketDataModule,
+    TradingModule,
   ],
 })
 export class AppModule {}
