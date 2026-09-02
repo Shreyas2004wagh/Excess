@@ -46,8 +46,16 @@ The web application runs at `http://localhost:3000`. The API health endpoint is
 available at `http://localhost:4000/api/v1/health`.
 
 After signing in, open `http://localhost:3000/terminal` for the live BTC-USD
-five-minute candlestick chart. Set `MARKET_DATA_PROVIDER=mock` for deterministic
-development or end-to-end tests without an external feed.
+five-minute candlestick chart and 1× paper-trading order ticket. Market buys fill
+at the current ask and sells fill at the current bid. The terminal shows the open
+position, equity, and unrealized P/L on every live price update. Set
+`MARKET_DATA_PROVIDER=mock` for deterministic development or end-to-end tests
+without an external feed.
+
+The authenticated trading interface is:
+
+- `POST /api/v1/trading/orders` — place an idempotent BTC-USD market order
+- `GET /api/v1/trading/portfolio` — load balance, equity, and open positions
 
 ## Quality checks
 
@@ -64,9 +72,10 @@ corepack pnpm test:e2e
 1. Foundation and local infrastructure
 2. Authentication and the $10,000 demo account
 3. Live BTC-USD market data and chart — complete
-4. Atomic market-order execution
-5. Positions and real-time portfolio P/L
-6. Production hardening
+4. Atomic market-order execution — complete
+5. Positions and real-time portfolio P/L — complete for BTC-USD
+6. Pending orders: limit, stop, stop-loss, and take-profit
+7. Margin, liquidation, and production hardening
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.
