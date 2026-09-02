@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "start": "next start --port 3000",
     "test": "vitest run --passWithNoTests --exclude 'e2e/**'",
-    "test:e2e": "dotenv -e .env.local -- playwright test",
+    "test:e2e": "dotenv -e .env.local -e ../../.env -- playwright test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -23,6 +23,7 @@
   "devDependencies": {
     "@clerk/backend": "^3.16.13",
     "@clerk/testing": "^2.2.31",
+    "@excess/database": "workspace:*",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.3.0",

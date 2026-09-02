@@ -15,6 +15,7 @@
     "@clerk/backend": "^3.16.13",
     "@excess/database": "workspace:*",
     "@excess/shared-types": "workspace:*",
+    "@excess/trading-engine": "workspace:*",
     "@nestjs/common": "^12.0.1",
     "@nestjs/config": "^12.0.0",
     "@nestjs/core": "^12.0.1",

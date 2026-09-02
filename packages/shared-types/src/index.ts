@@ -8,6 +8,13 @@ export interface HealthResponse {
 
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderType = 'MARKET' | 'LIMIT' | 'STOP';
+export type OrderStatus =
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'PARTIALLY_FILLED'
+  | 'FILLED'
+  | 'CANCELLED'
+  | 'REJECTED';
 
 export type UserStatus = 'ACTIVE' | 'SUSPENDED';
 export type AccountStatus = 'ACTIVE' | 'RESTRICTED' | 'CLOSED';
@@ -48,6 +55,65 @@ export interface LedgerEntrySummary {
 export interface LedgerPage {
   items: LedgerEntrySummary[];
   nextCursor: string | null;
+}
+
+export interface MarketOrderRequest {
+  clientOrderId: string;
+  symbol: 'BTC-USD';
+  side: OrderSide;
+  type: 'MARKET';
+  quantity: DecimalString;
+}
+
+export interface OrderSummary {
+  id: string;
+  clientOrderId: string;
+  symbol: string;
+  side: OrderSide;
+  type: OrderType;
+  quantity: DecimalString;
+  executedQuantity: DecimalString;
+  averageFillPrice: DecimalString | null;
+  status: OrderStatus;
+  createdAt: string;
+}
+
+export interface TradeSummary {
+  id: string;
+  orderId: string;
+  symbol: string;
+  side: OrderSide;
+  price: DecimalString;
+  quantity: DecimalString;
+  fee: DecimalString;
+  spreadBps: DecimalString;
+  slippageBps: DecimalString;
+  executedAt: string;
+}
+
+export interface PositionSummary {
+  id: string;
+  symbol: string;
+  signedQuantity: DecimalString;
+  averageEntryPrice: DecimalString | null;
+  markPrice: DecimalString;
+  notional: DecimalString;
+  realizedPnl: DecimalString;
+  unrealizedPnl: DecimalString;
+  updatedAt: string;
+}
+
+export interface PortfolioSummary {
+  account: DemoAccountSummary;
+  equity: DecimalString;
+  unrealizedPnl: DecimalString;
+  positions: PositionSummary[];
+}
+
+export interface MarketOrderResponse {
+  order: OrderSummary;
+  trade: TradeSummary;
+  portfolio: PortfolioSummary;
 }
 
 export type MarketDataStatus = 'CONNECTING' | 'LIVE' | 'STALE' | 'OFFLINE';
