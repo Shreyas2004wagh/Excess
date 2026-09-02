@@ -54,13 +54,20 @@ test('renders the authenticated live BTC-USD terminal', async ({ page }) => {
   await expect(page.getByText('● LIVE', { exact: true })).toBeVisible();
   await expect(page.getByText('Charts by TradingView')).toBeVisible();
   await expect(page.locator('canvas').first()).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'Order entry coming next' }),
-  ).toBeDisabled();
-
   const livePrice = page.getByTestId('live-price');
   const initialPrice = await livePrice.textContent();
   await expect
     .poll(() => livePrice.textContent(), { timeout: 5_000 })
     .not.toBe(initialPrice);
+
+  await page.getByLabel('Quantity (BTC)').fill('0.01');
+  await page.getByRole('button', { name: 'Buy BTC' }).click();
+  await expect(page.getByRole('status')).toContainText('Filled 0.01 BTC at $');
+  await expect(page.getByText('LONG', { exact: true })).toBeVisible();
+
+  const unrealizedPnl = page.getByTestId('live-unrealized-pnl');
+  const initialPnl = await unrealizedPnl.textContent();
+  await expect
+    .poll(() => unrealizedPnl.textContent(), { timeout: 5_000 })
+    .not.toBe(initialPnl);
 });
