@@ -1,7 +1,10 @@
 import type {
   CandleHistoryResponse,
   LedgerPage,
+  MarketOrderRequest,
+  MarketOrderResponse,
   MarketInstrumentSummary,
+  PortfolioSummary,
   SessionBootstrapResponse,
 } from '@excess/shared-types';
 
@@ -77,4 +80,15 @@ export function getMarketCandles(token: string, symbol = 'BTC-USD') {
     `/market-data/instruments/${symbol}/candles?granularity=300&limit=300`,
     token,
   );
+}
+
+export function getPortfolio(token: string) {
+  return request<PortfolioSummary>('/trading/portfolio', token);
+}
+
+export function placeMarketOrder(token: string, order: MarketOrderRequest) {
+  return request<MarketOrderResponse>('/trading/orders', token, {
+    method: 'POST',
+    body: JSON.stringify(order),
+  });
 }

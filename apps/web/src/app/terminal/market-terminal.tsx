@@ -3,11 +3,13 @@
 import { UserButton, useAuth } from '@clerk/nextjs';
 import type {
   CandleHistoryResponse,
-  DemoAccountSummary,
   MarketCandle,
   MarketDataStatus,
   MarketInstrumentSummary,
+  MarketOrderResponse,
   MarketTicker,
+  OrderSide,
+  PortfolioSummary,
   UserProfileSummary,
 } from '@excess/shared-types';
 import type {
@@ -17,9 +19,10 @@ import type {
   UTCTimestamp,
 } from 'lightweight-charts';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
+import { ExcessApiError, placeMarketOrder } from '../../lib/excess-api';
 import { formatCurrency } from '../../lib/format';
 
 const websocketUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000';
@@ -48,15 +51,43 @@ function statusTone(status: MarketDataStatus) {
   return 'text-rose-300';
 }
 
+function portfolioAtMark(
+  portfolio: PortfolioSummary,
+  markPrice: string,
+): PortfolioSummary {
+  const mark = Number(markPrice);
+  const positions = portfolio.positions.map((position) => {
+    const quantity = Number(position.signedQuantity);
+    const entry = Number(position.averageEntryPrice ?? markPrice);
+    return {
+      ...position,
+      markPrice,
+      notional: String(Math.abs(quantity) * mark),
+      unrealizedPnl: String((mark - entry) * quantity),
+    };
+  });
+  const unrealizedPnl = positions.reduce(
+    (total, position) => total + Number(position.unrealizedPnl),
+    0,
+  );
+
+  return {
+    ...portfolio,
+    equity: String(Number(portfolio.account.balance) + unrealizedPnl),
+    unrealizedPnl: String(unrealizedPnl),
+    positions,
+  };
+}
+
 export function MarketTerminal({
-  account,
   candles,
   instrument,
+  portfolio: initialPortfolio,
   user,
 }: {
-  account: DemoAccountSummary;
   candles: CandleHistoryResponse;
   instrument: MarketInstrumentSummary;
+  portfolio: PortfolioSummary;
   user: UserProfileSummary;
 }) {
   const { getToken } = useAuth();
@@ -69,6 +100,13 @@ export function MarketTerminal({
     instrument.ticker.status,
   );
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [portfolio, setPortfolio] =
+    useState<PortfolioSummary>(initialPortfolio);
+  const [side, setSide] = useState<OrderSide>('BUY');
+  const [quantity, setQuantity] = useState('0.01');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [lastFill, setLastFill] = useState<MarketOrderResponse | null>(null);
 
   useEffect(() => {
     const container = chartContainer.current;
@@ -186,6 +224,46 @@ export function MarketTerminal({
 
   const change = Number(ticker.change24h);
   const positive = change >= 0;
+  const livePortfolio = portfolioAtMark(portfolio, ticker.price);
+  const openPosition = livePortfolio.positions[0];
+  const estimatedPrice = side === 'BUY' ? ticker.ask : ticker.bid;
+  const parsedQuantity = Number(quantity);
+  const orderIsValid =
+    Number.isFinite(parsedQuantity) &&
+    parsedQuantity >= Number(instrument.minimumQuantity);
+
+  async function submitOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!orderIsValid || feedStatus !== 'LIVE') return;
+
+    setIsSubmitting(true);
+    setOrderError(null);
+    try {
+      const token = await getToken();
+      if (!token) {
+        throw new Error('Your session expired. Sign in and try again.');
+      }
+      const response = await placeMarketOrder(token, {
+        clientOrderId: crypto.randomUUID(),
+        symbol: 'BTC-USD',
+        side,
+        type: 'MARKET',
+        quantity,
+      });
+      setPortfolio(response.portfolio);
+      setLastFill(response);
+    } catch (error) {
+      setOrderError(
+        error instanceof ExcessApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : 'The order could not be placed.',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#080b0f] px-3 py-3 text-[var(--foreground)] sm:px-5 sm:py-4">
@@ -213,7 +291,10 @@ export function MarketTerminal({
           <div className="hidden text-right text-xs sm:block">
             <p className="text-[var(--muted)]">Demo balance</p>
             <p className="mt-0.5 font-mono">
-              {formatCurrency(account.balance, account.baseCurrency)}
+              {formatCurrency(
+                livePortfolio.account.balance,
+                livePortfolio.account.baseCurrency,
+              )}
             </p>
           </div>
           <Link className="button button-secondary" href="/dashboard">
@@ -242,7 +323,7 @@ export function MarketTerminal({
               <span>
                 <span className="block font-semibold">BTC / USD</span>
                 <span className="mt-1 block text-xs text-[var(--muted)]">
-                  Bitcoin · Spot
+                  Bitcoin · Demo CFD
                 </span>
               </span>
               <span
@@ -274,7 +355,7 @@ export function MarketTerminal({
               <div className="flex items-center gap-3">
                 <h1 className="text-lg font-semibold">BTC / USD</h1>
                 <span className="rounded-full border border-[var(--border)] px-2 py-0.5 font-mono text-[10px] text-[var(--muted)]">
-                  SPOT
+                  CFD
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap items-baseline gap-3">
@@ -346,47 +427,101 @@ export function MarketTerminal({
               DEMO
             </span>
           </div>
-          <div className="mt-6 grid grid-cols-2 rounded-xl bg-[#0b0f14] p-1 text-center text-sm">
-            <span className="rounded-lg bg-[var(--accent)]/10 py-2 text-[var(--accent)]">
-              Buy
-            </span>
-            <span className="py-2 text-[var(--muted)]">Sell</span>
-          </div>
-          <label className="mt-6 block text-xs text-[var(--muted)]">
-            Order type
-            <span className="mt-2 block rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 text-sm text-[var(--foreground)]">
-              Market
-            </span>
-          </label>
-          <label className="mt-4 block text-xs text-[var(--muted)]">
-            Quantity (BTC)
-            <span className="mt-2 block rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 font-mono text-sm text-[var(--muted)]">
-              0.00000000
-            </span>
-          </label>
-          <div className="mt-6 space-y-3 border-y border-[var(--border)] py-5 text-xs">
-            <div className="flex justify-between">
-              <span className="text-[var(--muted)]">Available</span>
-              <span className="font-mono">
-                {formatCurrency(account.balance, account.baseCurrency)}
+          <form onSubmit={submitOrder}>
+            <div className="mt-6 grid grid-cols-2 rounded-xl bg-[#0b0f14] p-1 text-center text-sm">
+              {(['BUY', 'SELL'] as const).map((nextSide) => (
+                <button
+                  aria-pressed={side === nextSide}
+                  className={`rounded-lg py-2 transition ${
+                    side === nextSide
+                      ? nextSide === 'BUY'
+                        ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                        : 'bg-rose-300/10 text-rose-300'
+                      : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                  }`}
+                  key={nextSide}
+                  onClick={() => setSide(nextSide)}
+                  type="button"
+                >
+                  {nextSide === 'BUY' ? 'Buy' : 'Sell'}
+                </button>
+              ))}
+            </div>
+            <label className="mt-6 block text-xs text-[var(--muted)]">
+              Order type
+              <span className="mt-2 block rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 text-sm text-[var(--foreground)]">
+                Market
               </span>
+            </label>
+            <label className="mt-4 block text-xs text-[var(--muted)]">
+              Quantity (BTC)
+              <input
+                className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+                inputMode="decimal"
+                min={instrument.minimumQuantity}
+                name="quantity"
+                onChange={(event) => setQuantity(event.target.value)}
+                required
+                step={instrument.lotSize}
+                type="number"
+                value={quantity}
+              />
+            </label>
+            <div className="mt-6 space-y-3 border-y border-[var(--border)] py-5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-[var(--muted)]">Equity</span>
+                <span className="font-mono">
+                  {formatCurrency(
+                    livePortfolio.equity,
+                    livePortfolio.account.baseCurrency,
+                  )}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[var(--muted)]">Estimated price</span>
+                <span className="font-mono">${decimal(estimatedPrice)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[var(--muted)]">Order value</span>
+                <span className="font-mono">
+                  $
+                  {decimal(
+                    String((parsedQuantity || 0) * Number(estimatedPrice)),
+                  )}
+                </span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-[var(--muted)]">Estimated price</span>
-              <span className="font-mono">${decimal(ticker.ask)}</span>
-            </div>
-          </div>
-          <button
-            className="mt-6 w-full cursor-not-allowed rounded-xl bg-white/5 px-4 py-3 text-sm text-[var(--muted)]"
-            disabled
-            type="button"
-          >
-            Order entry coming next
-          </button>
-          <p className="mt-4 text-center text-xs leading-5 text-[var(--muted)]">
-            Live prices are active. Execution remains disabled until the trading
-            engine milestone.
-          </p>
+            <button
+              className={`mt-6 w-full rounded-xl px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-[var(--muted)] ${
+                side === 'BUY'
+                  ? 'bg-[var(--accent)] text-[#0b1207]'
+                  : 'bg-rose-300 text-[#16090c]'
+              }`}
+              disabled={isSubmitting || !orderIsValid || feedStatus !== 'LIVE'}
+              type="submit"
+            >
+              {isSubmitting
+                ? 'Executing…'
+                : `${side === 'BUY' ? 'Buy' : 'Sell'} BTC`}
+            </button>
+          </form>
+          {orderError ? (
+            <p
+              className="mt-4 rounded-xl border border-rose-300/20 bg-rose-300/5 px-3 py-2 text-xs leading-5 text-rose-200"
+              role="alert"
+            >
+              {orderError}
+            </p>
+          ) : null}
+          {lastFill ? (
+            <p
+              className="mt-4 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/5 px-3 py-2 text-xs leading-5 text-[var(--accent)]"
+              role="status"
+            >
+              Filled {lastFill.trade.quantity} BTC at $
+              {decimal(lastFill.trade.price)}
+            </p>
+          ) : null}
           <div className="mt-8 border-t border-[var(--border)] pt-5 text-xs text-[var(--muted)]">
             Signed in as
             <span className="mt-1 block truncate text-[var(--foreground)]">
@@ -395,6 +530,117 @@ export function MarketTerminal({
           </div>
         </aside>
       </div>
+
+      <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+              Portfolio
+            </p>
+            <h2 className="mt-2 text-lg font-semibold">Open position</h2>
+          </div>
+          <span className="rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[10px] text-[var(--muted)]">
+            1× buying power
+          </span>
+        </div>
+        <div className="mt-5 grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4">
+          {[
+            [
+              'Equity',
+              formatCurrency(
+                livePortfolio.equity,
+                livePortfolio.account.baseCurrency,
+              ),
+            ],
+            [
+              'Unrealized P/L',
+              formatCurrency(
+                livePortfolio.unrealizedPnl,
+                livePortfolio.account.baseCurrency,
+              ),
+            ],
+            [
+              'Cash balance',
+              formatCurrency(
+                livePortfolio.account.balance,
+                livePortfolio.account.baseCurrency,
+              ),
+            ],
+            [
+              'Exposure',
+              formatCurrency(
+                openPosition?.notional ?? '0',
+                livePortfolio.account.baseCurrency,
+              ),
+            ],
+          ].map(([label, value]) => (
+            <div className="bg-[var(--surface)] px-4 py-4" key={label}>
+              <p className="text-[11px] text-[var(--muted)]">{label}</p>
+              <p
+                className={`mt-1 font-mono text-sm ${
+                  label === 'Unrealized P/L'
+                    ? Number(livePortfolio.unrealizedPnl) >= 0
+                      ? 'text-[var(--accent)]'
+                      : 'text-rose-300'
+                    : ''
+                }`}
+                data-testid={
+                  label === 'Unrealized P/L' ? 'live-unrealized-pnl' : undefined
+                }
+              >
+                {value}
+              </p>
+            </div>
+          ))}
+        </div>
+        {openPosition ? (
+          <div className="mt-4 grid gap-4 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-5">
+            <div>
+              <p className="text-xs text-[var(--muted)]">Instrument</p>
+              <p className="mt-1 font-semibold">{openPosition.symbol}</p>
+            </div>
+            <div>
+              <p className="text-xs text-[var(--muted)]">Side</p>
+              <p
+                className={`mt-1 font-mono ${
+                  Number(openPosition.signedQuantity) > 0
+                    ? 'text-[var(--accent)]'
+                    : 'text-rose-300'
+                }`}
+              >
+                {Number(openPosition.signedQuantity) > 0 ? 'LONG' : 'SHORT'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-[var(--muted)]">Quantity</p>
+              <p className="mt-1 font-mono">
+                {decimal(
+                  String(Math.abs(Number(openPosition.signedQuantity))),
+                  8,
+                )}{' '}
+                BTC
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-[var(--muted)]">Entry</p>
+              <p className="mt-1 font-mono">
+                ${decimal(openPosition.averageEntryPrice ?? '0')}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-[var(--muted)]">Mark</p>
+              <p className="mt-1 font-mono">
+                ${decimal(openPosition.markPrice)}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-4 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
+            No open BTC-USD position. Place a market order to start tracking
+            live P/L.
+          </p>
+        )}
+      </section>
     </main>
   );
 }

@@ -6,6 +6,7 @@ import {
   ExcessApiError,
   getMarketCandles,
   getMarketInstrument,
+  getPortfolio,
 } from '../../lib/excess-api';
 import { MarketTerminal } from './market-terminal';
 
@@ -22,16 +23,17 @@ export default async function TerminalPage() {
 
   try {
     const bootstrap = await bootstrapSession(token);
-    const [instrument, candles] = await Promise.all([
+    const [instrument, candles, portfolio] = await Promise.all([
       getMarketInstrument(token),
       getMarketCandles(token),
+      getPortfolio(token),
     ]);
 
     return (
       <MarketTerminal
-        account={bootstrap.account}
         candles={candles}
         instrument={instrument}
+        portfolio={portfolio}
         user={bootstrap.user}
       />
     );
