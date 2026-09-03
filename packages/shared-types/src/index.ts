@@ -15,6 +15,7 @@ export type OrderStatus =
   | 'FILLED'
   | 'CANCELLED'
   | 'REJECTED';
+export type OrderPurpose = 'ENTRY' | 'STOP_LOSS' | 'TAKE_PROFIT';
 
 export type UserStatus = 'ACTIVE' | 'SUSPENDED';
 export type AccountStatus = 'ACTIVE' | 'RESTRICTED' | 'CLOSED';
@@ -57,13 +58,31 @@ export interface LedgerPage {
   nextCursor: string | null;
 }
 
-export interface MarketOrderRequest {
+interface OrderRequestBase {
   clientOrderId: string;
   symbol: 'BTC-USD';
   side: OrderSide;
-  type: 'MARKET';
   quantity: DecimalString;
+  stopLossPrice?: DecimalString;
+  takeProfitPrice?: DecimalString;
 }
+
+export interface MarketOrderRequest extends OrderRequestBase {
+  type: 'MARKET';
+}
+
+export interface LimitOrderRequest extends OrderRequestBase {
+  type: 'LIMIT';
+  limitPrice: DecimalString;
+}
+
+export interface StopOrderRequest extends OrderRequestBase {
+  type: 'STOP';
+  stopPrice: DecimalString;
+}
+
+export type OrderPlacementRequest =
+  MarketOrderRequest | LimitOrderRequest | StopOrderRequest;
 
 export interface OrderSummary {
   id: string;
@@ -72,10 +91,18 @@ export interface OrderSummary {
   side: OrderSide;
   type: OrderType;
   quantity: DecimalString;
+  requestedPrice: DecimalString | null;
+  stopPrice: DecimalString | null;
+  stopLossPrice: DecimalString | null;
+  takeProfitPrice: DecimalString | null;
   executedQuantity: DecimalString;
   averageFillPrice: DecimalString | null;
   status: OrderStatus;
+  purpose: OrderPurpose;
+  reduceOnly: boolean;
+  parentOrderId: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface TradeSummary {
@@ -110,10 +137,19 @@ export interface PortfolioSummary {
   positions: PositionSummary[];
 }
 
-export interface MarketOrderResponse {
+export interface OrderPlacementResponse {
   order: OrderSummary;
-  trade: TradeSummary;
+  trade: TradeSummary | null;
+  relatedOrders: OrderSummary[];
   portfolio: PortfolioSummary;
+}
+
+export type MarketOrderResponse = Omit<OrderPlacementResponse, 'trade'> & {
+  trade: TradeSummary;
+};
+
+export interface OpenOrdersResponse {
+  items: OrderSummary[];
 }
 
 export type MarketDataStatus = 'CONNECTING' | 'LIVE' | 'STALE' | 'OFFLINE';

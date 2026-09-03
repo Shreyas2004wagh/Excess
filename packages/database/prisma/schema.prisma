@@ -48,6 +48,12 @@ enum OrderStatus {
   REJECTED
 }
 
+enum OrderPurpose {
+  ENTRY
+  STOP_LOSS
+  TAKE_PROFIT
+}
+
 enum LedgerEntryType {
   DEMO_CREDIT
   REALIZED_PNL
@@ -141,19 +147,31 @@ model Order {
   quantity         Decimal     @db.Decimal(28, 10)
   requestedPrice   Decimal?    @db.Decimal(28, 10)
   stopPrice        Decimal?    @db.Decimal(28, 10)
+  stopLossPrice    Decimal?    @db.Decimal(28, 10)
+  takeProfitPrice  Decimal?    @db.Decimal(28, 10)
   executedQuantity Decimal     @default(0) @db.Decimal(28, 10)
   averageFillPrice Decimal?    @db.Decimal(28, 10)
   status           OrderStatus @default(PENDING)
+  purpose          OrderPurpose @default(ENTRY)
+  reduceOnly       Boolean     @default(false)
+  parentOrderId    String?     @db.Uuid
+  ocoGroupId       String?     @db.Uuid
+  triggeredAt      DateTime?
   rejectionCode    String?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   account          Account     @relation(fields: [accountId], references: [id])
   instrument       Instrument  @relation(fields: [instrumentId], references: [id])
   trades           Trade[]
+  parentOrder      Order?      @relation("AttachedOrders", fields: [parentOrderId], references: [id])
+  attachedOrders   Order[]     @relation("AttachedOrders")
 
   @@unique([accountId, clientOrderId])
   @@index([accountId, createdAt])
+  @@index([accountId, status])
   @@index([instrumentId, status])
+  @@index([parentOrderId])
+  @@index([ocoGroupId])
 }
 
 model Trade {
