@@ -6,9 +6,12 @@ import type {
   MarketCandle,
   MarketDataStatus,
   MarketInstrumentSummary,
-  MarketOrderResponse,
   MarketTicker,
+  OrderPlacementRequest,
+  OrderPlacementResponse,
   OrderSide,
+  OrderSummary,
+  OrderType,
   PortfolioSummary,
   UserProfileSummary,
 } from '@excess/shared-types';
@@ -22,7 +25,13 @@ import Link from 'next/link';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
-import { ExcessApiError, placeMarketOrder } from '../../lib/excess-api';
+import {
+  cancelOrder,
+  ExcessApiError,
+  getOpenOrders,
+  getPortfolio,
+  placeOrder,
+} from '../../lib/excess-api';
 import { formatCurrency } from '../../lib/format';
 
 const websocketUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000';
@@ -49,6 +58,23 @@ function statusTone(status: MarketDataStatus) {
   if (status === 'CONNECTING') return 'text-sky-300';
   if (status === 'STALE') return 'text-amber-300';
   return 'text-rose-300';
+}
+
+function orderLabel(order: OrderSummary) {
+  if (order.purpose === 'STOP_LOSS') return 'Stop loss';
+  if (order.purpose === 'TAKE_PROFIT') return 'Take profit';
+  return order.type === 'LIMIT' ? 'Limit' : 'Stop';
+}
+
+function suggestedPrice(
+  type: OrderType,
+  side: OrderSide,
+  ticker: MarketTicker,
+) {
+  const executable = Number(side === 'BUY' ? ticker.ask : ticker.bid);
+  const offset = type === 'LIMIT' ? -100 : 100;
+  const direction = side === 'BUY' ? 1 : -1;
+  return (executable + offset * direction).toFixed(2);
 }
 
 function portfolioAtMark(
@@ -82,11 +108,13 @@ function portfolioAtMark(
 export function MarketTerminal({
   candles,
   instrument,
+  openOrders: initialOpenOrders,
   portfolio: initialPortfolio,
   user,
 }: {
   candles: CandleHistoryResponse;
   instrument: MarketInstrumentSummary;
+  openOrders: OrderSummary[];
   portfolio: PortfolioSummary;
   user: UserProfileSummary;
 }) {
@@ -103,10 +131,21 @@ export function MarketTerminal({
   const [portfolio, setPortfolio] =
     useState<PortfolioSummary>(initialPortfolio);
   const [side, setSide] = useState<OrderSide>('BUY');
+  const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [quantity, setQuantity] = useState('0.01');
+  const [orderPrice, setOrderPrice] = useState(instrument.ticker.price);
+  const [stopLossPrice, setStopLossPrice] = useState('');
+  const [takeProfitPrice, setTakeProfitPrice] = useState('');
+  const [openOrders, setOpenOrders] =
+    useState<OrderSummary[]>(initialOpenOrders);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(
+    null,
+  );
   const [orderError, setOrderError] = useState<string | null>(null);
-  const [lastFill, setLastFill] = useState<MarketOrderResponse | null>(null);
+  const [lastOrder, setLastOrder] = useState<OrderPlacementResponse | null>(
+    null,
+  );
 
   useEffect(() => {
     const container = chartContainer.current;
@@ -222,15 +261,46 @@ export function MarketTerminal({
     };
   }, [getToken, instrument.symbol]);
 
+  useEffect(() => {
+    let disposed = false;
+    const refresh = async () => {
+      const token = await getToken();
+      if (!token) return;
+      const [nextPortfolio, nextOrders] = await Promise.all([
+        getPortfolio(token),
+        getOpenOrders(token),
+      ]);
+      if (!disposed) {
+        setPortfolio(nextPortfolio);
+        setOpenOrders(nextOrders.items);
+      }
+    };
+    const interval = setInterval(() => {
+      void refresh().catch(() => undefined);
+    }, 3_000);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+    };
+  }, [getToken]);
+
   const change = Number(ticker.change24h);
   const positive = change >= 0;
   const livePortfolio = portfolioAtMark(portfolio, ticker.price);
   const openPosition = livePortfolio.positions[0];
-  const estimatedPrice = side === 'BUY' ? ticker.ask : ticker.bid;
+  const estimatedPrice =
+    orderType === 'MARKET'
+      ? side === 'BUY'
+        ? ticker.ask
+        : ticker.bid
+      : orderPrice;
   const parsedQuantity = Number(quantity);
+  const parsedOrderPrice = Number(orderPrice);
   const orderIsValid =
     Number.isFinite(parsedQuantity) &&
-    parsedQuantity >= Number(instrument.minimumQuantity);
+    parsedQuantity >= Number(instrument.minimumQuantity) &&
+    (orderType === 'MARKET' ||
+      (Number.isFinite(parsedOrderPrice) && parsedOrderPrice > 0));
 
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -243,15 +313,29 @@ export function MarketTerminal({
       if (!token) {
         throw new Error('Your session expired. Sign in and try again.');
       }
-      const response = await placeMarketOrder(token, {
+      const protection = {
+        ...(stopLossPrice ? { stopLossPrice } : {}),
+        ...(takeProfitPrice ? { takeProfitPrice } : {}),
+      };
+      const base = {
         clientOrderId: crypto.randomUUID(),
         symbol: 'BTC-USD',
         side,
-        type: 'MARKET',
         quantity,
-      });
+        ...protection,
+      } as const;
+      let request: OrderPlacementRequest;
+      if (orderType === 'LIMIT') {
+        request = { ...base, type: 'LIMIT', limitPrice: orderPrice };
+      } else if (orderType === 'STOP') {
+        request = { ...base, type: 'STOP', stopPrice: orderPrice };
+      } else {
+        request = { ...base, type: 'MARKET' };
+      }
+      const response = await placeOrder(token, request);
       setPortfolio(response.portfolio);
-      setLastFill(response);
+      setLastOrder(response);
+      setOpenOrders((await getOpenOrders(token)).items);
     } catch (error) {
       setOrderError(
         error instanceof ExcessApiError
@@ -262,6 +346,39 @@ export function MarketTerminal({
       );
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  function changeSide(nextSide: OrderSide) {
+    setSide(nextSide);
+    if (orderType !== 'MARKET') {
+      setOrderPrice(suggestedPrice(orderType, nextSide, ticker));
+    }
+  }
+
+  function changeOrderType(nextType: OrderType) {
+    setOrderType(nextType);
+    if (nextType !== 'MARKET') {
+      setOrderPrice(suggestedPrice(nextType, side, ticker));
+    }
+  }
+
+  async function cancelPendingOrder(orderId: string) {
+    setCancellingOrderId(orderId);
+    setOrderError(null);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Your session expired. Sign in again.');
+      await cancelOrder(token, orderId);
+      setOpenOrders((orders) => orders.filter((order) => order.id !== orderId));
+    } catch (error) {
+      setOrderError(
+        error instanceof Error
+          ? error.message
+          : 'The order could not be cancelled.',
+      );
+    } finally {
+      setCancellingOrderId(null);
     }
   }
 
@@ -440,19 +557,35 @@ export function MarketTerminal({
                       : 'text-[var(--muted)] hover:text-[var(--foreground)]'
                   }`}
                   key={nextSide}
-                  onClick={() => setSide(nextSide)}
+                  onClick={() => changeSide(nextSide)}
                   type="button"
                 >
                   {nextSide === 'BUY' ? 'Buy' : 'Sell'}
                 </button>
               ))}
             </div>
-            <label className="mt-6 block text-xs text-[var(--muted)]">
-              Order type
-              <span className="mt-2 block rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 text-sm text-[var(--foreground)]">
-                Market
-              </span>
-            </label>
+            <fieldset className="mt-6">
+              <legend className="text-xs text-[var(--muted)]">
+                Order type
+              </legend>
+              <div className="mt-2 grid grid-cols-3 rounded-xl bg-[#0b0f14] p-1 text-xs">
+                {(['MARKET', 'LIMIT', 'STOP'] as const).map((nextType) => (
+                  <button
+                    aria-pressed={orderType === nextType}
+                    className={`rounded-lg py-2.5 capitalize transition ${
+                      orderType === nextType
+                        ? 'bg-white/10 text-[var(--foreground)]'
+                        : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                    }`}
+                    key={nextType}
+                    onClick={() => changeOrderType(nextType)}
+                    type="button"
+                  >
+                    {nextType.toLowerCase()}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
             <label className="mt-4 block text-xs text-[var(--muted)]">
               Quantity (BTC)
               <input
@@ -467,6 +600,52 @@ export function MarketTerminal({
                 value={quantity}
               />
             </label>
+            {orderType !== 'MARKET' ? (
+              <label className="mt-4 block text-xs text-[var(--muted)]">
+                {orderType === 'LIMIT' ? 'Limit price' : 'Stop price'} (USD)
+                <input
+                  className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+                  inputMode="decimal"
+                  min={instrument.tickSize}
+                  name="orderPrice"
+                  onChange={(event) => setOrderPrice(event.target.value)}
+                  required
+                  step={instrument.tickSize}
+                  type="number"
+                  value={orderPrice}
+                />
+              </label>
+            ) : null}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <label className="block text-xs text-[var(--muted)]">
+                Stop loss (USD)
+                <input
+                  className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-3 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+                  inputMode="decimal"
+                  min={instrument.tickSize}
+                  name="stopLossPrice"
+                  onChange={(event) => setStopLossPrice(event.target.value)}
+                  placeholder="Optional"
+                  step={instrument.tickSize}
+                  type="number"
+                  value={stopLossPrice}
+                />
+              </label>
+              <label className="block text-xs text-[var(--muted)]">
+                Take profit (USD)
+                <input
+                  className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-3 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+                  inputMode="decimal"
+                  min={instrument.tickSize}
+                  name="takeProfitPrice"
+                  onChange={(event) => setTakeProfitPrice(event.target.value)}
+                  placeholder="Optional"
+                  step={instrument.tickSize}
+                  type="number"
+                  value={takeProfitPrice}
+                />
+              </label>
+            </div>
             <div className="mt-6 space-y-3 border-y border-[var(--border)] py-5 text-xs">
               <div className="flex justify-between">
                 <span className="text-[var(--muted)]">Equity</span>
@@ -501,8 +680,10 @@ export function MarketTerminal({
               type="submit"
             >
               {isSubmitting
-                ? 'Executing…'
-                : `${side === 'BUY' ? 'Buy' : 'Sell'} BTC`}
+                ? orderType === 'MARKET'
+                  ? 'Executing…'
+                  : 'Submitting…'
+                : `${side === 'BUY' ? 'Buy' : 'Sell'} BTC · ${orderType.toLowerCase()}`}
             </button>
           </form>
           {orderError ? (
@@ -513,13 +694,30 @@ export function MarketTerminal({
               {orderError}
             </p>
           ) : null}
-          {lastFill ? (
+          {lastOrder ? (
             <p
               className="mt-4 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/5 px-3 py-2 text-xs leading-5 text-[var(--accent)]"
               role="status"
             >
-              Filled {lastFill.trade.quantity} BTC at $
-              {decimal(lastFill.trade.price)}
+              {lastOrder.trade ? (
+                <>
+                  Filled {lastOrder.trade.quantity} BTC at $
+                  {decimal(lastOrder.trade.price)}
+                  {lastOrder.relatedOrders.length > 0
+                    ? ` · ${lastOrder.relatedOrders.length} protection order${lastOrder.relatedOrders.length === 1 ? '' : 's'} active`
+                    : ''}
+                </>
+              ) : (
+                <>
+                  {lastOrder.order.type === 'LIMIT' ? 'Limit' : 'Stop'} order
+                  accepted at $
+                  {decimal(
+                    lastOrder.order.requestedPrice ??
+                      lastOrder.order.stopPrice ??
+                      '0',
+                  )}
+                </>
+              )}
             </p>
           ) : null}
           <div className="mt-8 border-t border-[var(--border)] pt-5 text-xs text-[var(--muted)]">
@@ -638,6 +836,71 @@ export function MarketTerminal({
           <p className="mt-4 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
             No open BTC-USD position. Place a market order to start tracking
             live P/L.
+          </p>
+        )}
+      </section>
+
+      <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+              Orders
+            </p>
+            <h2 className="mt-2 text-lg font-semibold">Open orders</h2>
+          </div>
+          <span className="rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[10px] text-[var(--muted)]">
+            {openOrders.length} active
+          </span>
+        </div>
+        {openOrders.length > 0 ? (
+          <div className="mt-5 space-y-2" data-testid="open-orders">
+            {openOrders.map((order) => {
+              const label = orderLabel(order);
+              const triggerPrice =
+                order.requestedPrice ?? order.stopPrice ?? '0';
+              return (
+                <div
+                  className="grid items-center gap-3 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_auto]"
+                  key={order.id}
+                >
+                  <div>
+                    <p className="font-semibold">{label}</p>
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      {order.reduceOnly ? 'Reduce only · OCO' : 'Entry order'}
+                    </p>
+                  </div>
+                  <p
+                    className={`font-mono text-xs ${order.side === 'BUY' ? 'text-[var(--accent)]' : 'text-rose-300'}`}
+                  >
+                    {order.side}
+                  </p>
+                  <div>
+                    <p className="text-xs text-[var(--muted)]">Quantity</p>
+                    <p className="mt-1 font-mono">{order.quantity} BTC</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--muted)]">
+                      {order.type === 'STOP' ? 'Trigger' : 'Limit'}
+                    </p>
+                    <p className="mt-1 font-mono">${decimal(triggerPrice)}</p>
+                  </div>
+                  <button
+                    aria-label={`Cancel ${label.toLowerCase()} order`}
+                    className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted)] transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-50"
+                    disabled={cancellingOrderId === order.id}
+                    onClick={() => void cancelPendingOrder(order.id)}
+                    type="button"
+                  >
+                    {cancellingOrderId === order.id ? 'Cancelling…' : 'Cancel'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-5 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
+            No open orders. Limit, stop, and attached protection orders will
+            appear here.
           </p>
         )}
       </section>

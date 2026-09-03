@@ -4,6 +4,10 @@ import type {
   MarketOrderRequest,
   MarketOrderResponse,
   MarketInstrumentSummary,
+  OpenOrdersResponse,
+  OrderPlacementRequest,
+  OrderPlacementResponse,
+  OrderSummary,
   PortfolioSummary,
   SessionBootstrapResponse,
 } from '@excess/shared-types';
@@ -90,5 +94,22 @@ export function placeMarketOrder(token: string, order: MarketOrderRequest) {
   return request<MarketOrderResponse>('/trading/orders', token, {
     method: 'POST',
     body: JSON.stringify(order),
+  });
+}
+
+export function placeOrder(token: string, order: OrderPlacementRequest) {
+  return request<OrderPlacementResponse>('/trading/orders', token, {
+    method: 'POST',
+    body: JSON.stringify(order),
+  });
+}
+
+export function getOpenOrders(token: string) {
+  return request<OpenOrdersResponse>('/trading/orders/open', token);
+}
+
+export function cancelOrder(token: string, orderId: string) {
+  return request<OrderSummary>(`/trading/orders/${orderId}`, token, {
+    method: 'DELETE',
   });
 }
