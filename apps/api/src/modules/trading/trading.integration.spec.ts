@@ -216,3 +216,226 @@ describe('Milestone 3 market-order execution', () => {
     });
   });
 });
+
+describe('Milestone 4 pending and protective orders', () => {
+  const pendingClerkUserId = `user_pending_${randomUUID()}`;
+  const pendingIdentity = {
+    clerkUserId: pendingClerkUserId,
+    sessionId: 'session_pending',
+  };
+  const pendingTicker: MarketTicker = {
+    ...ticker,
+    price: '65000',
+    bid: '64999.5',
+    ask: '65000.5',
+  };
+  const database = new DatabaseService();
+  const clerk = {
+    getUserProfile: jest.fn(async () => ({
+      clerkUserId: pendingClerkUserId,
+      email: 'trader+pending@example.com',
+      displayName: 'Pending Trader',
+    })),
+  } as unknown as ClerkGateway;
+  const marketData = {
+    getCurrentTicker: jest.fn(() => pendingTicker),
+  } as unknown as MarketDataService;
+  const session = new SessionService(database, clerk);
+  const trading = new TradingService(database, marketData);
+
+  beforeAll(async () => {
+    await database.onModuleInit();
+    await session.bootstrap(pendingIdentity);
+    await database.client.instrument.upsert({
+      where: { symbol: 'BTC-USD' },
+      create: {
+        symbol: 'BTC-USD',
+        baseCurrency: 'BTC',
+        quoteCurrency: 'USD',
+        pricePrecision: 2,
+        quantityPrecision: 8,
+        tickSize: '0.01',
+        lotSize: '0.00000001',
+        minimumQuantity: '0.00000001',
+      },
+      update: {},
+    });
+  });
+
+  afterAll(async () => {
+    const user = await database.client.user.findUnique({
+      where: { clerkId: pendingClerkUserId },
+      include: { accounts: true },
+    });
+    if (user) {
+      const accountIds = user.accounts.map((account) => account.id);
+      const orders = await database.client.order.findMany({
+        where: { accountId: { in: accountIds } },
+        select: { id: true },
+      });
+      await database.client.$transaction([
+        database.client.outboxEvent.deleteMany({
+          where: { aggregateId: { in: orders.map((order) => order.id) } },
+        }),
+        database.client.auditEvent.deleteMany({
+          where: { actorUserId: user.id },
+        }),
+        database.client.ledgerEntry.deleteMany({
+          where: { accountId: { in: accountIds } },
+        }),
+        database.client.trade.deleteMany({
+          where: { accountId: { in: accountIds } },
+        }),
+        database.client.order.deleteMany({
+          where: { accountId: { in: accountIds } },
+        }),
+        database.client.position.deleteMany({
+          where: { accountId: { in: accountIds } },
+        }),
+        database.client.account.deleteMany({ where: { userId: user.id } }),
+        database.client.user.delete({ where: { id: user.id } }),
+      ]);
+    }
+    await database.onModuleDestroy();
+  });
+
+  it('accepts and cancels a resting limit order', async () => {
+    const placed = await trading.placeOrder(pendingIdentity, {
+      clientOrderId: randomUUID(),
+      symbol: 'BTC-USD',
+      side: 'BUY',
+      type: 'LIMIT',
+      quantity: '0.05',
+      limitPrice: '64000',
+    });
+
+    expect(placed).toMatchObject({
+      order: {
+        status: 'ACCEPTED',
+        type: 'LIMIT',
+        requestedPrice: '64000',
+      },
+      trade: null,
+    });
+    expect((await trading.getOpenOrders(pendingIdentity)).items).toHaveLength(
+      1,
+    );
+
+    const cancelled = await trading.cancelOrder(
+      pendingIdentity,
+      placed.order.id,
+    );
+    expect(cancelled.status).toBe('CANCELLED');
+    expect((await trading.getOpenOrders(pendingIdentity)).items).toHaveLength(
+      0,
+    );
+  });
+
+  it('fills a buy stop once the live ask crosses its trigger', async () => {
+    const placed = await trading.placeOrder(pendingIdentity, {
+      clientOrderId: randomUUID(),
+      symbol: 'BTC-USD',
+      side: 'BUY',
+      type: 'STOP',
+      quantity: '0.05',
+      stopPrice: '65100',
+    });
+    pendingTicker.price = '65110';
+    pendingTicker.bid = '65109.5';
+    pendingTicker.ask = '65110';
+    await trading.processPendingOrders(pendingTicker);
+
+    const order = await database.client.order.findUniqueOrThrow({
+      where: { id: placed.order.id },
+      include: { trades: true },
+    });
+    expect(order.status).toBe('FILLED');
+    expect(order.triggeredAt).toBeInstanceOf(Date);
+    expect(order.trades).toHaveLength(1);
+    expect(order.trades[0]?.price.toString()).toBe('65110');
+    expect(
+      (await trading.getPortfolio(pendingIdentity)).positions[0],
+    ).toMatchObject({ signedQuantity: '0.05', averageEntryPrice: '65110' });
+  });
+
+  it('creates OCO protection and cancels the sibling after take-profit', async () => {
+    await trading.placeMarketOrder(pendingIdentity, {
+      clientOrderId: randomUUID(),
+      symbol: 'BTC-USD',
+      side: 'SELL',
+      type: 'MARKET',
+      quantity: '0.05',
+    });
+    pendingTicker.price = '65000';
+    pendingTicker.bid = '64999.5';
+    pendingTicker.ask = '65000.5';
+    const entry = await trading.placeOrder(pendingIdentity, {
+      clientOrderId: randomUUID(),
+      symbol: 'BTC-USD',
+      side: 'BUY',
+      type: 'MARKET',
+      quantity: '0.05',
+      stopLossPrice: '64000',
+      takeProfitPrice: '66000',
+    });
+
+    expect(entry.relatedOrders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ purpose: 'STOP_LOSS', reduceOnly: true }),
+        expect.objectContaining({ purpose: 'TAKE_PROFIT', reduceOnly: true }),
+      ]),
+    );
+    pendingTicker.price = '66010';
+    pendingTicker.bid = '66010';
+    pendingTicker.ask = '66010.5';
+    await trading.processPendingOrders(pendingTicker);
+
+    const protections = await database.client.order.findMany({
+      where: { parentOrderId: entry.order.id },
+      orderBy: { purpose: 'asc' },
+    });
+    expect(protections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ purpose: 'STOP_LOSS', status: 'CANCELLED' }),
+        expect.objectContaining({ purpose: 'TAKE_PROFIT', status: 'FILLED' }),
+      ]),
+    );
+    expect((await trading.getPortfolio(pendingIdentity)).positions).toEqual([]);
+    expect(
+      await database.client.ledgerEntry.count({
+        where: {
+          accountId: entry.portfolio.account.id,
+          type: 'REALIZED_PNL',
+        },
+      }),
+    ).toBe(2);
+  });
+
+  it('rejects a triggered entry that no longer has enough buying power', async () => {
+    pendingTicker.price = '66000';
+    pendingTicker.bid = '65999.5';
+    pendingTicker.ask = '66000.5';
+    const placed = await trading.placeOrder(pendingIdentity, {
+      clientOrderId: randomUUID(),
+      symbol: 'BTC-USD',
+      side: 'BUY',
+      type: 'LIMIT',
+      quantity: '1',
+      limitPrice: '65000',
+    });
+
+    pendingTicker.price = '64999';
+    pendingTicker.bid = '64998.5';
+    pendingTicker.ask = '64999.5';
+    await trading.processPendingOrders(pendingTicker);
+
+    const order = await database.client.order.findUniqueOrThrow({
+      where: { id: placed.order.id },
+    });
+    expect(order).toMatchObject({
+      status: 'REJECTED',
+      rejectionCode: 'INSUFFICIENT_BUYING_POWER',
+    });
+    expect(order.triggeredAt).toBeInstanceOf(Date);
+  });
+});
