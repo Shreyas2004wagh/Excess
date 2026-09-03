@@ -61,7 +61,7 @@ test('renders the authenticated live BTC-USD terminal', async ({ page }) => {
     .not.toBe(initialPrice);
 
   await page.getByLabel('Quantity (BTC)').fill('0.01');
-  await page.getByRole('button', { name: 'Buy BTC' }).click();
+  await page.getByRole('button', { name: 'Buy BTC · market' }).click();
   await expect(page.getByRole('status')).toContainText('Filled 0.01 BTC at $');
   await expect(page.getByText('LONG', { exact: true })).toBeVisible();
 
@@ -70,4 +70,14 @@ test('renders the authenticated live BTC-USD terminal', async ({ page }) => {
   await expect
     .poll(() => unrealizedPnl.textContent(), { timeout: 5_000 })
     .not.toBe(initialPnl);
+
+  await page.getByRole('button', { name: 'limit' }).click();
+  await expect(page.getByLabel('Limit price (USD)')).toBeVisible();
+  await page.getByRole('button', { name: 'Buy BTC · limit' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'Limit order accepted at $',
+  );
+  await expect(page.getByTestId('open-orders')).toContainText('Entry order');
+  await page.getByRole('button', { name: 'Cancel limit order' }).click();
+  await expect(page.getByText('No open orders.')).toBeVisible();
 });

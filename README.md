@@ -47,14 +47,18 @@ available at `http://localhost:4000/api/v1/health`.
 
 After signing in, open `http://localhost:3000/terminal` for the live BTC-USD
 five-minute candlestick chart and 1× paper-trading order ticket. Market buys fill
-at the current ask and sells fill at the current bid. The terminal shows the open
-position, equity, and unrealized P/L on every live price update. Set
+at the current ask and sells fill at the current bid. Limit and stop orders remain
+open until the live ticker crosses their price, and optional stop-loss/take-profit
+orders protect filled positions as an OCO pair. The terminal shows open orders,
+the open position, equity, and unrealized P/L on every live price update. Set
 `MARKET_DATA_PROVIDER=mock` for deterministic development or end-to-end tests
 without an external feed.
 
 The authenticated trading interface is:
 
-- `POST /api/v1/trading/orders` — place an idempotent BTC-USD market order
+- `POST /api/v1/trading/orders` — place an idempotent market, limit, or stop order
+- `GET /api/v1/trading/orders/open` — load accepted pending/protection orders
+- `DELETE /api/v1/trading/orders/:orderId` — cancel an accepted order
 - `GET /api/v1/trading/portfolio` — load balance, equity, and open positions
 
 ## Quality checks
@@ -74,7 +78,7 @@ corepack pnpm test:e2e
 3. Live BTC-USD market data and chart — complete
 4. Atomic market-order execution — complete
 5. Positions and real-time portfolio P/L — complete for BTC-USD
-6. Pending orders: limit, stop, stop-loss, and take-profit
+6. Pending orders: limit, stop, stop-loss, and take-profit — complete for BTC-USD
 7. Margin, liquidation, and production hardening
 
 Excess is paper trading software. It does not hold funds or place orders on a real

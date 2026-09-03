@@ -23,7 +23,10 @@ export default async function globalTeardown() {
       where: { aggregateId: { in: orders.map((order) => order.id) } },
     }),
     prisma.auditEvent.deleteMany({
-      where: { actorUserId: user.id, action: 'MARKET_ORDER_FILLED' },
+      where: {
+        actorUserId: user.id,
+        action: { in: ['MARKET_ORDER_FILLED', 'ORDER_FILLED'] },
+      },
     }),
     prisma.ledgerEntry.deleteMany({
       where: { accountId: { in: accountIds }, type: 'REALIZED_PNL' },
