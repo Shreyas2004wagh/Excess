@@ -6,7 +6,7 @@ export default async function globalTeardown() {
 
   const user = await prisma.user.findFirst({
     where: { email },
-    include: { accounts: true },
+    include: { accounts: true, priceAlerts: true },
   });
   if (!user) {
     await prisma.$disconnect();
@@ -14,18 +14,31 @@ export default async function globalTeardown() {
   }
 
   const accountIds = user.accounts.map((account) => account.id);
+  const alertIds = user.priceAlerts.map((alert) => alert.id);
   const orders = await prisma.order.findMany({
     where: { accountId: { in: accountIds } },
     select: { id: true },
   });
   await prisma.$transaction([
     prisma.outboxEvent.deleteMany({
-      where: { aggregateId: { in: orders.map((order) => order.id) } },
+      where: {
+        OR: [
+          { aggregateId: { in: orders.map((order) => order.id) } },
+          { aggregateType: 'PRICE_ALERT', aggregateId: { in: alertIds } },
+        ],
+      },
     }),
     prisma.auditEvent.deleteMany({
       where: {
         actorUserId: user.id,
-        action: { in: ['MARKET_ORDER_FILLED', 'ORDER_FILLED'] },
+        action: {
+          in: [
+            'MARKET_ORDER_FILLED',
+            'ORDER_FILLED',
+            'NEGATIVE_BALANCE_PROTECTED',
+            'PRICE_ALERT_TRIGGERED',
+          ],
+        },
       },
     }),
     prisma.ledgerEntry.deleteMany({
@@ -34,6 +47,7 @@ export default async function globalTeardown() {
     prisma.trade.deleteMany({ where: { accountId: { in: accountIds } } }),
     prisma.order.deleteMany({ where: { accountId: { in: accountIds } } }),
     prisma.position.deleteMany({ where: { accountId: { in: accountIds } } }),
+    prisma.priceAlert.deleteMany({ where: { userId: user.id } }),
     ...user.accounts.map((account) =>
       prisma.account.update({
         where: { id: account.id },

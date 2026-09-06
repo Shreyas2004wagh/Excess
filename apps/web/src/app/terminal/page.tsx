@@ -8,6 +8,7 @@ import {
   getMarketInstrument,
   getOpenOrders,
   getPortfolio,
+  getPriceAlerts,
 } from '../../lib/excess-api';
 import { MarketTerminal } from './market-terminal';
 
@@ -24,12 +25,14 @@ export default async function TerminalPage() {
 
   try {
     const bootstrap = await bootstrapSession(token);
-    const [instrument, candles, portfolio, openOrders] = await Promise.all([
-      getMarketInstrument(token),
-      getMarketCandles(token),
-      getPortfolio(token),
-      getOpenOrders(token),
-    ]);
+    const [instrument, candles, portfolio, openOrders, priceAlerts] =
+      await Promise.all([
+        getMarketInstrument(token),
+        getMarketCandles(token),
+        getPortfolio(token),
+        getOpenOrders(token),
+        getPriceAlerts(token),
+      ]);
 
     return (
       <MarketTerminal
@@ -37,6 +40,7 @@ export default async function TerminalPage() {
         instrument={instrument}
         openOrders={openOrders.items}
         portfolio={portfolio}
+        priceAlerts={priceAlerts.items}
         user={bootstrap.user}
       />
     );

@@ -1,5 +1,6 @@
 import type {
   CandleHistoryResponse,
+  CreatePriceAlertRequest,
   LedgerPage,
   MarketOrderRequest,
   MarketOrderResponse,
@@ -9,6 +10,8 @@ import type {
   OrderPlacementResponse,
   OrderSummary,
   PortfolioSummary,
+  PriceAlertsResponse,
+  PriceAlertSummary,
   SessionBootstrapResponse,
 } from '@excess/shared-types';
 
@@ -110,6 +113,26 @@ export function getOpenOrders(token: string) {
 
 export function cancelOrder(token: string, orderId: string) {
   return request<OrderSummary>(`/trading/orders/${orderId}`, token, {
+    method: 'DELETE',
+  });
+}
+
+export function getPriceAlerts(token: string) {
+  return request<PriceAlertsResponse>('/alerts', token);
+}
+
+export function createPriceAlert(
+  token: string,
+  alert: CreatePriceAlertRequest,
+) {
+  return request<PriceAlertSummary>('/alerts', token, {
+    method: 'POST',
+    body: JSON.stringify(alert),
+  });
+}
+
+export function cancelPriceAlert(token: string, alertId: string) {
+  return request<PriceAlertSummary>(`/alerts/${alertId}`, token, {
     method: 'DELETE',
   });
 }

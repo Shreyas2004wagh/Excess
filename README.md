@@ -15,9 +15,9 @@ sees portfolio profit and loss update in real time.
 - `packages/risk-engine` — margin and account-risk calculations
 - `packages/shared-types` — contracts shared by the browser and API
 
-PostgreSQL is authoritative for users, balances, orders, trades, positions, and
-the financial ledger. Coinbase supplies public BTC-USD candles and live ticker
-updates; Redis caches normalized snapshots before the NestJS WebSocket gateway
+PostgreSQL is authoritative for users, balances, orders, trades, positions, price
+alerts, and the financial ledger. Coinbase supplies public BTC-USD candles and
+live ticker updates; Redis caches normalized snapshots before the NestJS WebSocket gateway
 fans them out to authenticated terminals.
 
 ## Requirements
@@ -46,13 +46,20 @@ The web application runs at `http://localhost:3000`. The API health endpoint is
 available at `http://localhost:4000/api/v1/health`.
 
 After signing in, open `http://localhost:3000/terminal` for the live BTC-USD
-five-minute candlestick chart and 1× paper-trading order ticket. Market buys fill
-at the current ask and sells fill at the current bid. Limit and stop orders remain
-open until the live ticker crosses their price, and optional stop-loss/take-profit
+five-minute candlestick chart and leveraged paper-trading order ticket. Market
+buys fill at the current ask and sells fill at the current bid. Limit and stop
+orders remain open until the live ticker crosses their price, and optional stop-loss/take-profit
 orders protect filled positions as an OCO pair. The terminal shows open orders,
-the open position, equity, and unrealized P/L on every live price update. Set
+the open position, equity, unrealized P/L, used/free margin, and margin level on
+every live price update. Select 1×, 2×, 5×, or 10× leverage per position. A margin
+warning starts at 100%; at 50% the risk engine closes the position and prevents a
+gap loss from making the demo balance negative. Set
 `MARKET_DATA_PROVIDER=mock` for deterministic development or end-to-end tests
 without an external feed.
+
+One-shot price alerts can watch for a move above or below a BTC-USD target. A
+trigger is recorded atomically with an outbox delivery event so repeated or
+concurrent ticker processing cannot notify twice.
 
 The authenticated trading interface is:
 
@@ -60,6 +67,9 @@ The authenticated trading interface is:
 - `GET /api/v1/trading/orders/open` — load accepted pending/protection orders
 - `DELETE /api/v1/trading/orders/:orderId` — cancel an accepted order
 - `GET /api/v1/trading/portfolio` — load balance, equity, and open positions
+- `POST /api/v1/alerts` — create a one-shot BTC-USD price alert
+- `GET /api/v1/alerts` — list active, triggered, and cancelled alerts
+- `DELETE /api/v1/alerts/:alertId` — cancel an active alert
 
 ## Quality checks
 
@@ -79,7 +89,9 @@ corepack pnpm test:e2e
 4. Atomic market-order execution — complete
 5. Positions and real-time portfolio P/L — complete for BTC-USD
 6. Pending orders: limit, stop, stop-loss, and take-profit — complete for BTC-USD
-7. Margin, liquidation, and production hardening
+7. Leverage, margin, liquidation, and negative-balance protection — complete for BTC-USD
+8. Persistent one-shot price alerts — complete for BTC-USD
+9. Administration, observability, rate limiting, and production hardening
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.

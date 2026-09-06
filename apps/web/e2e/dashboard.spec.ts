@@ -61,9 +61,13 @@ test('renders the authenticated live BTC-USD terminal', async ({ page }) => {
     .not.toBe(initialPrice);
 
   await page.getByLabel('Quantity (BTC)').fill('0.01');
+  await page.getByRole('button', { name: '2×', exact: true }).click();
   await page.getByRole('button', { name: 'Buy BTC · market' }).click();
   await expect(page.getByRole('status')).toContainText('Filled 0.01 BTC at $');
   await expect(page.getByText('LONG', { exact: true })).toBeVisible();
+  await expect(page.getByText(/2× · \$/)).toBeVisible();
+  await expect(page.getByTestId('risk-state')).toHaveText('HEALTHY');
+  await expect(page.getByTestId('used-margin')).not.toHaveText('$0.00');
 
   const unrealizedPnl = page.getByTestId('live-unrealized-pnl');
   const initialPnl = await unrealizedPnl.textContent();
@@ -80,4 +84,14 @@ test('renders the authenticated live BTC-USD terminal', async ({ page }) => {
   await expect(page.getByTestId('open-orders')).toContainText('Entry order');
   await page.getByRole('button', { name: 'Cancel limit order' }).click();
   await expect(page.getByText('No open orders.')).toBeVisible();
+
+  await expect(page.getByLabel('Alert price (USD)')).toBeVisible();
+  await page.getByRole('button', { name: 'Create alert' }).click();
+  await expect(page.getByTestId('price-alerts')).toContainText(
+    'Watching live price',
+  );
+  await page.getByRole('button', { name: 'Cancel above price alert' }).click();
+  await expect(
+    page.getByText('No active or triggered alerts yet.'),
+  ).toBeVisible();
 });

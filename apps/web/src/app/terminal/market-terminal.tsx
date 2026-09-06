@@ -3,6 +3,7 @@
 import { UserButton, useAuth } from '@clerk/nextjs';
 import type {
   CandleHistoryResponse,
+  Leverage,
   MarketCandle,
   MarketDataStatus,
   MarketInstrumentSummary,
@@ -13,6 +14,8 @@ import type {
   OrderSummary,
   OrderType,
   PortfolioSummary,
+  PriceAlertDirection,
+  PriceAlertSummary,
   UserProfileSummary,
 } from '@excess/shared-types';
 import type {
@@ -26,10 +29,13 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
 import {
+  cancelPriceAlert,
   cancelOrder,
+  createPriceAlert,
   ExcessApiError,
   getOpenOrders,
   getPortfolio,
+  getPriceAlerts,
   placeOrder,
 } from '../../lib/excess-api';
 import { formatCurrency } from '../../lib/format';
@@ -77,6 +83,14 @@ function suggestedPrice(
   return (executable + offset * direction).toFixed(2);
 }
 
+function suggestedAlertPrice(
+  direction: PriceAlertDirection,
+  ticker: MarketTicker,
+) {
+  const offset = direction === 'ABOVE' ? 500 : -500;
+  return (Number(ticker.price) + offset).toFixed(2);
+}
+
 function portfolioAtMark(
   portfolio: PortfolioSummary,
   markPrice: string,
@@ -89,6 +103,7 @@ function portfolioAtMark(
       ...position,
       markPrice,
       notional: String(Math.abs(quantity) * mark),
+      usedMargin: String((Math.abs(quantity) * mark) / position.leverage),
       unrealizedPnl: String((mark - entry) * quantity),
     };
   });
@@ -96,11 +111,27 @@ function portfolioAtMark(
     (total, position) => total + Number(position.unrealizedPnl),
     0,
   );
+  const usedMargin = positions.reduce(
+    (total, position) => total + Number(position.usedMargin),
+    0,
+  );
+  const equity = Number(portfolio.account.balance) + unrealizedPnl;
+  const marginLevel = usedMargin === 0 ? null : (equity / usedMargin) * 100;
+  const riskState =
+    marginLevel !== null && marginLevel <= 50
+      ? 'LIQUIDATION'
+      : marginLevel !== null && marginLevel <= 100
+        ? 'MARGIN_WARNING'
+        : 'HEALTHY';
 
   return {
     ...portfolio,
-    equity: String(Number(portfolio.account.balance) + unrealizedPnl),
+    equity: String(equity),
     unrealizedPnl: String(unrealizedPnl),
+    usedMargin: String(usedMargin),
+    freeMargin: String(equity - usedMargin),
+    marginLevel: marginLevel === null ? null : String(marginLevel),
+    riskState,
     positions,
   };
 }
@@ -110,12 +141,14 @@ export function MarketTerminal({
   instrument,
   openOrders: initialOpenOrders,
   portfolio: initialPortfolio,
+  priceAlerts: initialPriceAlerts,
   user,
 }: {
   candles: CandleHistoryResponse;
   instrument: MarketInstrumentSummary;
   openOrders: OrderSummary[];
   portfolio: PortfolioSummary;
+  priceAlerts: PriceAlertSummary[];
   user: UserProfileSummary;
 }) {
   const { getToken } = useAuth();
@@ -133,11 +166,26 @@ export function MarketTerminal({
   const [side, setSide] = useState<OrderSide>('BUY');
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [quantity, setQuantity] = useState('0.01');
+  const [leverage, setLeverage] = useState<Leverage>(
+    initialPortfolio.positions[0]?.leverage ?? 1,
+  );
   const [orderPrice, setOrderPrice] = useState(instrument.ticker.price);
   const [stopLossPrice, setStopLossPrice] = useState('');
   const [takeProfitPrice, setTakeProfitPrice] = useState('');
   const [openOrders, setOpenOrders] =
     useState<OrderSummary[]>(initialOpenOrders);
+  const [priceAlerts, setPriceAlerts] =
+    useState<PriceAlertSummary[]>(initialPriceAlerts);
+  const [alertDirection, setAlertDirection] =
+    useState<PriceAlertDirection>('ABOVE');
+  const [alertPrice, setAlertPrice] = useState(
+    suggestedAlertPrice('ABOVE', instrument.ticker),
+  );
+  const [isCreatingAlert, setIsCreatingAlert] = useState(false);
+  const [cancellingAlertId, setCancellingAlertId] = useState<string | null>(
+    null,
+  );
+  const [alertError, setAlertError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(
     null,
@@ -266,13 +314,15 @@ export function MarketTerminal({
     const refresh = async () => {
       const token = await getToken();
       if (!token) return;
-      const [nextPortfolio, nextOrders] = await Promise.all([
+      const [nextPortfolio, nextOrders, nextAlerts] = await Promise.all([
         getPortfolio(token),
         getOpenOrders(token),
+        getPriceAlerts(token),
       ]);
       if (!disposed) {
         setPortfolio(nextPortfolio);
         setOpenOrders(nextOrders.items);
+        setPriceAlerts(nextAlerts.items);
       }
     };
     const interval = setInterval(() => {
@@ -301,6 +351,11 @@ export function MarketTerminal({
     parsedQuantity >= Number(instrument.minimumQuantity) &&
     (orderType === 'MARKET' ||
       (Number.isFinite(parsedOrderPrice) && parsedOrderPrice > 0));
+  const estimatedMargin =
+    ((parsedQuantity || 0) * Number(estimatedPrice)) / leverage;
+  const visibleAlerts = priceAlerts.filter(
+    (alert) => alert.status !== 'CANCELLED',
+  );
 
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -322,6 +377,7 @@ export function MarketTerminal({
         symbol: 'BTC-USD',
         side,
         quantity,
+        leverage,
         ...protection,
       } as const;
       let request: OrderPlacementRequest;
@@ -382,6 +438,55 @@ export function MarketTerminal({
     }
   }
 
+  function changeAlertDirection(direction: PriceAlertDirection) {
+    setAlertDirection(direction);
+    setAlertPrice(suggestedAlertPrice(direction, ticker));
+  }
+
+  async function submitPriceAlert(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsCreatingAlert(true);
+    setAlertError(null);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Your session expired. Sign in again.');
+      const alert = await createPriceAlert(token, {
+        symbol: 'BTC-USD',
+        direction: alertDirection,
+        targetPrice: alertPrice,
+      });
+      setPriceAlerts((items) => [alert, ...items]);
+      setAlertPrice(suggestedAlertPrice(alertDirection, ticker));
+    } catch (error) {
+      setAlertError(
+        error instanceof Error
+          ? error.message
+          : 'The alert could not be created.',
+      );
+    } finally {
+      setIsCreatingAlert(false);
+    }
+  }
+
+  async function cancelActiveAlert(alertId: string) {
+    setCancellingAlertId(alertId);
+    setAlertError(null);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Your session expired. Sign in again.');
+      await cancelPriceAlert(token, alertId);
+      setPriceAlerts((items) => items.filter((item) => item.id !== alertId));
+    } catch (error) {
+      setAlertError(
+        error instanceof Error
+          ? error.message
+          : 'The alert could not be cancelled.',
+      );
+    } finally {
+      setCancellingAlertId(null);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#080b0f] px-3 py-3 text-[var(--foreground)] sm:px-5 sm:py-4">
       <nav className="flex min-h-14 flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-3">
@@ -424,6 +529,22 @@ export function MarketTerminal({
       {streamError ? (
         <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-2 text-sm text-amber-200">
           {streamError}
+        </div>
+      ) : null}
+
+      {livePortfolio.riskState !== 'HEALTHY' ? (
+        <div
+          className={`mt-3 rounded-xl border px-4 py-3 text-sm ${
+            livePortfolio.riskState === 'LIQUIDATION'
+              ? 'border-rose-300/30 bg-rose-300/10 text-rose-100'
+              : 'border-amber-300/30 bg-amber-300/10 text-amber-100'
+          }`}
+          data-testid="risk-alert"
+          role="alert"
+        >
+          {livePortfolio.riskState === 'LIQUIDATION'
+            ? 'Liquidation threshold reached. The risk engine is closing the position.'
+            : 'Margin warning: margin level is at or below 100%. Reduce exposure or add funds.'}
         </div>
       ) : null}
 
@@ -600,6 +721,32 @@ export function MarketTerminal({
                 value={quantity}
               />
             </label>
+            <fieldset className="mt-4">
+              <legend className="text-xs text-[var(--muted)]">Leverage</legend>
+              <div className="mt-2 grid grid-cols-4 rounded-xl bg-[#0b0f14] p-1 text-xs">
+                {([1, 2, 5, 10] as const).map((nextLeverage) => (
+                  <button
+                    aria-pressed={leverage === nextLeverage}
+                    className={`rounded-lg py-2.5 transition ${
+                      leverage === nextLeverage
+                        ? 'bg-white/10 text-[var(--foreground)]'
+                        : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                    }`}
+                    key={nextLeverage}
+                    onClick={() => setLeverage(nextLeverage)}
+                    type="button"
+                  >
+                    {nextLeverage}×
+                  </button>
+                ))}
+              </div>
+              {openPosition && openPosition.leverage !== leverage ? (
+                <p className="mt-2 text-[11px] leading-4 text-amber-200">
+                  Adding to this position requires {openPosition.leverage}×.
+                  Closing orders keep its current leverage.
+                </p>
+              ) : null}
+            </fieldset>
             {orderType !== 'MARKET' ? (
               <label className="mt-4 block text-xs text-[var(--muted)]">
                 {orderType === 'LIMIT' ? 'Limit price' : 'Stop price'} (USD)
@@ -667,6 +814,12 @@ export function MarketTerminal({
                   {decimal(
                     String((parsedQuantity || 0) * Number(estimatedPrice)),
                   )}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[var(--muted)]">Required margin</span>
+                <span className="font-mono">
+                  ${decimal(String(estimatedMargin))}
                 </span>
               </div>
             </div>
@@ -737,11 +890,20 @@ export function MarketTerminal({
             </p>
             <h2 className="mt-2 text-lg font-semibold">Open position</h2>
           </div>
-          <span className="rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[10px] text-[var(--muted)]">
-            1× buying power
+          <span
+            className={`rounded-full border px-3 py-1 font-mono text-[10px] ${
+              livePortfolio.riskState === 'HEALTHY'
+                ? 'border-[var(--border)] text-[var(--muted)]'
+                : livePortfolio.riskState === 'MARGIN_WARNING'
+                  ? 'border-amber-300/30 text-amber-200'
+                  : 'border-rose-300/30 text-rose-200'
+            }`}
+            data-testid="risk-state"
+          >
+            {livePortfolio.riskState.replace('_', ' ')}
           </span>
         </div>
-        <div className="mt-5 grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4">
+        <div className="mt-5 grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3 xl:grid-cols-6">
           {[
             [
               'Equity',
@@ -765,11 +927,24 @@ export function MarketTerminal({
               ),
             ],
             [
-              'Exposure',
+              'Used margin',
               formatCurrency(
-                openPosition?.notional ?? '0',
+                livePortfolio.usedMargin,
                 livePortfolio.account.baseCurrency,
               ),
+            ],
+            [
+              'Free margin',
+              formatCurrency(
+                livePortfolio.freeMargin,
+                livePortfolio.account.baseCurrency,
+              ),
+            ],
+            [
+              'Margin level',
+              livePortfolio.marginLevel === null
+                ? '—'
+                : `${decimal(livePortfolio.marginLevel)}%`,
             ],
           ].map(([label, value]) => (
             <div className="bg-[var(--surface)] px-4 py-4" key={label}>
@@ -783,7 +958,13 @@ export function MarketTerminal({
                     : ''
                 }`}
                 data-testid={
-                  label === 'Unrealized P/L' ? 'live-unrealized-pnl' : undefined
+                  label === 'Unrealized P/L'
+                    ? 'live-unrealized-pnl'
+                    : label === 'Used margin'
+                      ? 'used-margin'
+                      : label === 'Margin level'
+                        ? 'margin-level'
+                        : undefined
                 }
               >
                 {value}
@@ -792,7 +973,7 @@ export function MarketTerminal({
           ))}
         </div>
         {openPosition ? (
-          <div className="mt-4 grid gap-4 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-5">
+          <div className="mt-4 grid gap-4 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-3 xl:grid-cols-6">
             <div>
               <p className="text-xs text-[var(--muted)]">Instrument</p>
               <p className="mt-1 font-semibold">{openPosition.symbol}</p>
@@ -831,6 +1012,12 @@ export function MarketTerminal({
                 ${decimal(openPosition.markPrice)}
               </p>
             </div>
+            <div>
+              <p className="text-xs text-[var(--muted)]">Leverage / margin</p>
+              <p className="mt-1 font-mono">
+                {openPosition.leverage}× · ${decimal(openPosition.usedMargin)}
+              </p>
+            </div>
           </div>
         ) : (
           <p className="mt-4 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
@@ -866,7 +1053,8 @@ export function MarketTerminal({
                   <div>
                     <p className="font-semibold">{label}</p>
                     <p className="mt-1 text-xs text-[var(--muted)]">
-                      {order.reduceOnly ? 'Reduce only · OCO' : 'Entry order'}
+                      {order.reduceOnly ? 'Reduce only · OCO' : 'Entry order'} ·{' '}
+                      {order.leverage}×
                     </p>
                   </div>
                   <p
@@ -901,6 +1089,130 @@ export function MarketTerminal({
           <p className="mt-5 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
             No open orders. Limit, stop, and attached protection orders will
             appear here.
+          </p>
+        )}
+      </section>
+
+      <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+              Monitoring
+            </p>
+            <h2 className="mt-2 text-lg font-semibold">Price alerts</h2>
+            <p className="mt-2 max-w-xl text-sm text-[var(--muted)]">
+              Trigger once when the live BTC-USD price crosses your target.
+            </p>
+          </div>
+          <form
+            className="grid w-full gap-3 sm:grid-cols-[auto_minmax(180px,1fr)_auto] xl:w-auto"
+            onSubmit={submitPriceAlert}
+          >
+            <fieldset>
+              <legend className="sr-only">Alert direction</legend>
+              <div className="grid grid-cols-2 rounded-xl bg-[#0b0f14] p-1 text-xs">
+                {(['ABOVE', 'BELOW'] as const).map((direction) => (
+                  <button
+                    aria-pressed={alertDirection === direction}
+                    className={`rounded-lg px-4 py-2.5 capitalize transition ${
+                      alertDirection === direction
+                        ? 'bg-white/10 text-[var(--foreground)]'
+                        : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                    }`}
+                    key={direction}
+                    onClick={() => changeAlertDirection(direction)}
+                    type="button"
+                  >
+                    {direction.toLowerCase()}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <label className="sr-only" htmlFor="alert-price">
+              Alert price (USD)
+            </label>
+            <input
+              className="rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-2.5 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+              id="alert-price"
+              inputMode="decimal"
+              min={instrument.tickSize}
+              onChange={(event) => setAlertPrice(event.target.value)}
+              required
+              step={instrument.tickSize}
+              type="number"
+              value={alertPrice}
+            />
+            <button
+              className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-[#0b1207] transition disabled:cursor-wait disabled:opacity-50"
+              disabled={isCreatingAlert || feedStatus !== 'LIVE'}
+              type="submit"
+            >
+              {isCreatingAlert ? 'Creating…' : 'Create alert'}
+            </button>
+          </form>
+        </div>
+        {alertError ? (
+          <p
+            className="mt-4 rounded-xl border border-rose-300/20 bg-rose-300/5 px-3 py-2 text-xs leading-5 text-rose-200"
+            role="alert"
+          >
+            {alertError}
+          </p>
+        ) : null}
+        {visibleAlerts.length > 0 ? (
+          <div className="mt-5 space-y-2" data-testid="price-alerts">
+            {visibleAlerts.map((alert) => (
+              <div
+                className="grid items-center gap-3 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-[1.2fr_1fr_1fr_auto]"
+                key={alert.id}
+              >
+                <div>
+                  <p className="font-semibold">
+                    BTC-USD {alert.direction.toLowerCase()} $
+                    {decimal(alert.targetPrice)}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Created {new Date(alert.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <p
+                  className={`font-mono text-xs ${
+                    alert.status === 'TRIGGERED'
+                      ? 'text-[var(--accent)]'
+                      : 'text-sky-300'
+                  }`}
+                >
+                  {alert.status}
+                </p>
+                <p className="text-xs text-[var(--muted)]">
+                  {alert.status === 'TRIGGERED'
+                    ? `Triggered at $${decimal(alert.triggeredPrice ?? alert.targetPrice)}`
+                    : 'Watching live price'}
+                  {alert.deliveryStatus
+                    ? ` · Delivery ${alert.deliveryStatus.toLowerCase()}`
+                    : ''}
+                </p>
+                {alert.status === 'ACTIVE' ? (
+                  <button
+                    aria-label={`Cancel ${alert.direction.toLowerCase()} price alert`}
+                    className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted)] transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-50"
+                    disabled={cancellingAlertId === alert.id}
+                    onClick={() => void cancelActiveAlert(alert.id)}
+                    type="button"
+                  >
+                    {cancellingAlertId === alert.id ? 'Cancelling…' : 'Cancel'}
+                  </button>
+                ) : (
+                  <span className="text-right font-mono text-[10px] text-[var(--muted)]">
+                    ONE-SHOT
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-5 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
+            No active or triggered alerts yet.
           </p>
         )}
       </section>
