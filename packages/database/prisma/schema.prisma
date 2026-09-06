@@ -52,6 +52,7 @@ enum OrderPurpose {
   ENTRY
   STOP_LOSS
   TAKE_PROFIT
+  LIQUIDATION
 }
 
 enum LedgerEntryType {
@@ -67,36 +68,48 @@ enum OutboxStatus {
   FAILED
 }
 
+enum PriceAlertDirection {
+  ABOVE
+  BELOW
+}
+
+enum PriceAlertStatus {
+  ACTIVE
+  TRIGGERED
+  CANCELLED
+}
+
 model User {
-  id                String     @id @default(uuid()) @db.Uuid
-  clerkId           String     @unique
+  id                String       @id @default(uuid()) @db.Uuid
+  clerkId           String       @unique
   email             String
   displayName       String?
-  status            UserStatus @default(ACTIVE)
+  status            UserStatus   @default(ACTIVE)
   identityDeletedAt DateTime?
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
   accounts          Account[]
   auditEvents       AuditEvent[]
+  priceAlerts       PriceAlert[]
 
   @@index([email])
 }
 
 model Account {
-  id            String        @id @default(uuid()) @db.Uuid
-  userId        String        @db.Uuid
-  type          AccountType   @default(DEMO)
-  baseCurrency  String        @default("USD")
-  balance       Decimal       @default(0) @db.Decimal(28, 10)
-  initialBalance Decimal      @default(0) @db.Decimal(28, 10)
-  status        AccountStatus @default(ACTIVE)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  user          User          @relation(fields: [userId], references: [id])
-  ledgerEntries LedgerEntry[]
-  orders        Order[]
-  positions     Position[]
-  trades        Trade[]
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String        @db.Uuid
+  type           AccountType   @default(DEMO)
+  baseCurrency   String        @default("USD")
+  balance        Decimal       @default(0) @db.Decimal(28, 10)
+  initialBalance Decimal       @default(0) @db.Decimal(28, 10)
+  status         AccountStatus @default(ACTIVE)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  user           User          @relation(fields: [userId], references: [id])
+  ledgerEntries  LedgerEntry[]
+  orders         Order[]
+  positions      Position[]
+  trades         Trade[]
 
   @@unique([userId, type, baseCurrency])
   @@index([userId])
@@ -135,36 +148,56 @@ model Instrument {
   orders            Order[]
   positions         Position[]
   trades            Trade[]
+  priceAlerts       PriceAlert[]
+}
+
+model PriceAlert {
+  id             String              @id @default(uuid()) @db.Uuid
+  userId         String              @db.Uuid
+  instrumentId   String              @db.Uuid
+  direction      PriceAlertDirection
+  targetPrice    Decimal             @db.Decimal(28, 10)
+  status         PriceAlertStatus    @default(ACTIVE)
+  triggeredPrice Decimal?            @db.Decimal(28, 10)
+  triggeredAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  user           User                @relation(fields: [userId], references: [id])
+  instrument     Instrument          @relation(fields: [instrumentId], references: [id])
+
+  @@index([userId, status, createdAt])
+  @@index([instrumentId, status, targetPrice])
 }
 
 model Order {
-  id               String      @id @default(uuid()) @db.Uuid
-  accountId        String      @db.Uuid
-  instrumentId     String      @db.Uuid
+  id               String       @id @default(uuid()) @db.Uuid
+  accountId        String       @db.Uuid
+  instrumentId     String       @db.Uuid
   clientOrderId    String
   side             OrderSide
   type             OrderType
-  quantity         Decimal     @db.Decimal(28, 10)
-  requestedPrice   Decimal?    @db.Decimal(28, 10)
-  stopPrice        Decimal?    @db.Decimal(28, 10)
-  stopLossPrice    Decimal?    @db.Decimal(28, 10)
-  takeProfitPrice  Decimal?    @db.Decimal(28, 10)
-  executedQuantity Decimal     @default(0) @db.Decimal(28, 10)
-  averageFillPrice Decimal?    @db.Decimal(28, 10)
-  status           OrderStatus @default(PENDING)
+  quantity         Decimal      @db.Decimal(28, 10)
+  leverage         Decimal      @default(1) @db.Decimal(12, 4)
+  requestedPrice   Decimal?     @db.Decimal(28, 10)
+  stopPrice        Decimal?     @db.Decimal(28, 10)
+  stopLossPrice    Decimal?     @db.Decimal(28, 10)
+  takeProfitPrice  Decimal?     @db.Decimal(28, 10)
+  executedQuantity Decimal      @default(0) @db.Decimal(28, 10)
+  averageFillPrice Decimal?     @db.Decimal(28, 10)
+  status           OrderStatus  @default(PENDING)
   purpose          OrderPurpose @default(ENTRY)
-  reduceOnly       Boolean     @default(false)
-  parentOrderId    String?     @db.Uuid
-  ocoGroupId       String?     @db.Uuid
+  reduceOnly       Boolean      @default(false)
+  parentOrderId    String?      @db.Uuid
+  ocoGroupId       String?      @db.Uuid
   triggeredAt      DateTime?
   rejectionCode    String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-  account          Account     @relation(fields: [accountId], references: [id])
-  instrument       Instrument  @relation(fields: [instrumentId], references: [id])
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  account          Account      @relation(fields: [accountId], references: [id])
+  instrument       Instrument   @relation(fields: [instrumentId], references: [id])
   trades           Trade[]
-  parentOrder      Order?      @relation("AttachedOrders", fields: [parentOrderId], references: [id])
-  attachedOrders   Order[]     @relation("AttachedOrders")
+  parentOrder      Order?       @relation("AttachedOrders", fields: [parentOrderId], references: [id])
+  attachedOrders   Order[]      @relation("AttachedOrders")
 
   @@unique([accountId, clientOrderId])
   @@index([accountId, createdAt])

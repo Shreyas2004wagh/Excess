@@ -439,3 +439,186 @@ describe('Milestone 4 pending and protective orders', () => {
     expect(order.triggeredAt).toBeInstanceOf(Date);
   });
 });
+
+describe('Milestone 5 margin and liquidation', () => {
+  const riskClerkUserId = `user_risk_${randomUUID()}`;
+  const riskIdentity = {
+    clerkUserId: riskClerkUserId,
+    sessionId: 'session_risk',
+  };
+  const riskTicker: MarketTicker = {
+    ...ticker,
+    price: '65000',
+    bid: '64999.5',
+    ask: '65000.5',
+  };
+  const database = new DatabaseService();
+  const clerk = {
+    getUserProfile: jest.fn(async () => ({
+      clerkUserId: riskClerkUserId,
+      email: 'trader+risk@example.com',
+      displayName: 'Risk Trader',
+    })),
+  } as unknown as ClerkGateway;
+  const marketData = {
+    getCurrentTicker: jest.fn(() => riskTicker),
+  } as unknown as MarketDataService;
+  const session = new SessionService(database, clerk);
+  const trading = new TradingService(database, marketData);
+
+  beforeAll(async () => {
+    await database.onModuleInit();
+    await session.bootstrap(riskIdentity);
+    await database.client.instrument.upsert({
+      where: { symbol: 'BTC-USD' },
+      create: {
+        symbol: 'BTC-USD',
+        baseCurrency: 'BTC',
+        quoteCurrency: 'USD',
+        pricePrecision: 2,
+        quantityPrecision: 8,
+        tickSize: '0.01',
+        lotSize: '0.00000001',
+        minimumQuantity: '0.00000001',
+      },
+      update: {},
+    });
+  });
+
+  afterAll(async () => {
+    const user = await database.client.user.findUnique({
+      where: { clerkId: riskClerkUserId },
+      include: { accounts: true },
+    });
+    if (user) {
+      const accountIds = user.accounts.map((account) => account.id);
+      const orders = await database.client.order.findMany({
+        where: { accountId: { in: accountIds } },
+        select: { id: true },
+      });
+      await database.client.$transaction([
+        database.client.outboxEvent.deleteMany({
+          where: { aggregateId: { in: orders.map((order) => order.id) } },
+        }),
+        database.client.auditEvent.deleteMany({
+          where: { actorUserId: user.id },
+        }),
+        database.client.ledgerEntry.deleteMany({
+          where: { accountId: { in: accountIds } },
+        }),
+        database.client.trade.deleteMany({
+          where: { accountId: { in: accountIds } },
+        }),
+        database.client.order.deleteMany({
+          where: { accountId: { in: accountIds } },
+        }),
+        database.client.position.deleteMany({
+          where: { accountId: { in: accountIds } },
+        }),
+        database.client.account.deleteMany({ where: { userId: user.id } }),
+        database.client.user.delete({ where: { id: user.id } }),
+      ]);
+    }
+    await database.onModuleDestroy();
+  });
+
+  it('calculates leveraged margin and rejects mixed leverage', async () => {
+    const entry = await trading.placeOrder(riskIdentity, {
+      clientOrderId: randomUUID(),
+      symbol: 'BTC-USD',
+      side: 'BUY',
+      type: 'MARKET',
+      quantity: '1',
+      leverage: 10,
+    });
+
+    expect(entry.order.leverage).toBe(10);
+    expect(entry.portfolio).toMatchObject({
+      equity: '9999.5',
+      unrealizedPnl: '-0.5',
+      usedMargin: '6500',
+      freeMargin: '3499.5',
+      riskState: 'HEALTHY',
+      positions: [{ leverage: 10, usedMargin: '6500' }],
+    });
+    expect(Number(entry.portfolio.marginLevel)).toBeCloseTo(153.83846, 4);
+
+    await expect(
+      trading.placeOrder(riskIdentity, {
+        clientOrderId: randomUUID(),
+        symbol: 'BTC-USD',
+        side: 'BUY',
+        type: 'MARKET',
+        quantity: '0.01',
+        leverage: 5,
+      }),
+    ).rejects.toMatchObject({
+      response: { code: 'POSITION_LEVERAGE_MISMATCH' },
+    });
+  });
+
+  it('warns on low margin, liquidates, and protects the balance from a gap', async () => {
+    riskTicker.price = '60000';
+    riskTicker.bid = '59999.5';
+    riskTicker.ask = '60000.5';
+    const warning = await trading.getPortfolio(riskIdentity);
+    expect(warning.riskState).toBe('MARGIN_WARNING');
+    expect(Number(warning.marginLevel)).toBeCloseTo(83.325, 3);
+
+    const resting = await trading.placeOrder(riskIdentity, {
+      clientOrderId: randomUUID(),
+      symbol: 'BTC-USD',
+      side: 'SELL',
+      type: 'LIMIT',
+      quantity: '0.1',
+      leverage: 10,
+      limitPrice: '70000',
+    });
+
+    riskTicker.price = '55000';
+    riskTicker.bid = '54999.5';
+    riskTicker.ask = '55000.5';
+    await trading.processLiquidations(riskTicker);
+
+    const [account, position, liquidation, cancelled, ledger] =
+      await Promise.all([
+        database.client.account.findUniqueOrThrow({
+          where: { id: warning.account.id },
+        }),
+        database.client.position.findFirstOrThrow({
+          where: { accountId: warning.account.id },
+        }),
+        database.client.order.findFirstOrThrow({
+          where: {
+            accountId: warning.account.id,
+            purpose: 'LIQUIDATION',
+          },
+        }),
+        database.client.order.findUniqueOrThrow({
+          where: { id: resting.order.id },
+        }),
+        database.client.ledgerEntry.findFirstOrThrow({
+          where: {
+            accountId: warning.account.id,
+            type: 'REALIZED_PNL',
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]);
+
+    expect(account.balance.toString()).toBe('0');
+    expect(position.signedQuantity.toString()).toBe('0');
+    expect(liquidation).toMatchObject({
+      status: 'FILLED',
+      reduceOnly: true,
+      side: 'SELL',
+    });
+    expect(cancelled.status).toBe('CANCELLED');
+    expect(ledger.amount.toString()).toBe('-10000');
+    expect(ledger.balanceAfter.toString()).toBe('0');
+    expect(ledger.metadata).toMatchObject({
+      negativeBalanceProtection: true,
+      protectedAmount: '1',
+    });
+  });
+});

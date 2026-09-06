@@ -1,4 +1,8 @@
 export type DecimalString = string;
+export type Leverage = 1 | 2 | 5 | 10;
+export type RiskState = 'HEALTHY' | 'MARGIN_WARNING' | 'LIQUIDATION';
+export type PriceAlertDirection = 'ABOVE' | 'BELOW';
+export type PriceAlertStatus = 'ACTIVE' | 'TRIGGERED' | 'CANCELLED';
 
 export interface HealthResponse {
   service: 'excess-api';
@@ -15,7 +19,8 @@ export type OrderStatus =
   | 'FILLED'
   | 'CANCELLED'
   | 'REJECTED';
-export type OrderPurpose = 'ENTRY' | 'STOP_LOSS' | 'TAKE_PROFIT';
+export type OrderPurpose =
+  'ENTRY' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'LIQUIDATION';
 
 export type UserStatus = 'ACTIVE' | 'SUSPENDED';
 export type AccountStatus = 'ACTIVE' | 'RESTRICTED' | 'CLOSED';
@@ -63,6 +68,7 @@ interface OrderRequestBase {
   symbol: 'BTC-USD';
   side: OrderSide;
   quantity: DecimalString;
+  leverage?: Leverage;
   stopLossPrice?: DecimalString;
   takeProfitPrice?: DecimalString;
 }
@@ -91,6 +97,7 @@ export interface OrderSummary {
   side: OrderSide;
   type: OrderType;
   quantity: DecimalString;
+  leverage: Leverage;
   requestedPrice: DecimalString | null;
   stopPrice: DecimalString | null;
   stopLossPrice: DecimalString | null;
@@ -125,6 +132,8 @@ export interface PositionSummary {
   averageEntryPrice: DecimalString | null;
   markPrice: DecimalString;
   notional: DecimalString;
+  leverage: Leverage;
+  usedMargin: DecimalString;
   realizedPnl: DecimalString;
   unrealizedPnl: DecimalString;
   updatedAt: string;
@@ -134,6 +143,10 @@ export interface PortfolioSummary {
   account: DemoAccountSummary;
   equity: DecimalString;
   unrealizedPnl: DecimalString;
+  usedMargin: DecimalString;
+  freeMargin: DecimalString;
+  marginLevel: DecimalString | null;
+  riskState: RiskState;
   positions: PositionSummary[];
 }
 
@@ -150,6 +163,29 @@ export type MarketOrderResponse = Omit<OrderPlacementResponse, 'trade'> & {
 
 export interface OpenOrdersResponse {
   items: OrderSummary[];
+}
+
+export interface CreatePriceAlertRequest {
+  symbol: 'BTC-USD';
+  direction: PriceAlertDirection;
+  targetPrice: DecimalString;
+}
+
+export interface PriceAlertSummary {
+  id: string;
+  symbol: string;
+  direction: PriceAlertDirection;
+  targetPrice: DecimalString;
+  status: PriceAlertStatus;
+  deliveryStatus: 'PENDING' | 'PUBLISHED' | 'FAILED' | null;
+  triggeredPrice: DecimalString | null;
+  triggeredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PriceAlertsResponse {
+  items: PriceAlertSummary[];
 }
 
 export type MarketDataStatus = 'CONNECTING' | 'LIVE' | 'STALE' | 'OFFLINE';

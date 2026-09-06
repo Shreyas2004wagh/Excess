@@ -25,6 +25,7 @@ import {
 } from '@excess/database';
 import type {
   DemoAccountSummary,
+  Leverage,
   MarketOrderRequest,
   MarketOrderResponse,
   MarketTicker,
@@ -37,6 +38,10 @@ import type {
   TradeSummary,
 } from '@excess/shared-types';
 import {
+  calculateAccountMetrics,
+  calculatePositionMargin,
+} from '@excess/risk-engine';
+import {
   applyFillToPosition,
   calculateUnrealizedPnl,
   shouldTriggerPendingOrder,
@@ -47,6 +52,7 @@ import { DatabaseService } from '../database/database.service.js';
 import { MarketDataService } from '../market-data/market-data.service.js';
 
 const MAX_TRANSACTION_ATTEMPTS = 5;
+const SUPPORTED_LEVERAGE = [1, 2, 5, 10] as const;
 
 type AccountWithPositions = Prisma.AccountGetPayload<{
   include: { positions: { include: { instrument: true } } };
@@ -86,6 +92,7 @@ function serializeOrder(order: OrderWithInstrument): OrderSummary {
     side: order.side,
     type: order.type,
     quantity: order.quantity.toString(),
+    leverage: Number(order.leverage) as Leverage,
     requestedPrice: order.requestedPrice?.toString() ?? null,
     stopPrice: order.stopPrice?.toString() ?? null,
     stopLossPrice: order.stopLossPrice?.toString() ?? null,
@@ -132,6 +139,11 @@ function positionSummary(
         }),
       )
     : new Prisma.Decimal(0);
+  const usedMargin = calculatePositionMargin({
+    signedQuantity: position.signedQuantity.toString(),
+    markPrice: markPrice.toString(),
+    leverage: position.leverage.toString(),
+  });
 
   return {
     id: position.id,
@@ -140,6 +152,8 @@ function positionSummary(
     averageEntryPrice: position.averageEntryPrice?.toString() ?? null,
     markPrice: markPrice.toString(),
     notional: position.signedQuantity.abs().mul(markPrice).toString(),
+    leverage: Number(position.leverage) as Leverage,
+    usedMargin,
     realizedPnl: position.realizedPnl.toString(),
     unrealizedPnl: unrealizedPnl.toString(),
     updatedAt: position.updatedAt.toISOString(),
@@ -158,11 +172,24 @@ function serializePortfolio(
     (total, position) => total.plus(position.unrealizedPnl),
     new Prisma.Decimal(0),
   );
+  const usedMargin = positions.reduce(
+    (total, position) => total.plus(position.usedMargin),
+    new Prisma.Decimal(0),
+  );
+  const metrics = calculateAccountMetrics({
+    balance: account.balance.toString(),
+    unrealizedPnl: unrealizedPnl.toString(),
+    usedMargin: usedMargin.toString(),
+  });
 
   return {
     account: serializeAccount(account),
-    equity: account.balance.plus(unrealizedPnl).toString(),
+    equity: metrics.equity,
     unrealizedPnl: unrealizedPnl.toString(),
+    usedMargin: metrics.usedMargin,
+    freeMargin: metrics.freeMargin,
+    marginLevel: metrics.marginLevel,
+    riskState: metrics.riskState,
     positions,
   };
 }
@@ -172,6 +199,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(TradingService.name);
   private unsubscribeMarketData: (() => void) | null = null;
   private processingPendingOrders = false;
+  private processingLiquidations = false;
 
   constructor(
     private readonly database: DatabaseService,
@@ -181,7 +209,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
   onApplicationBootstrap() {
     this.unsubscribeMarketData = this.marketData.subscribe((event) => {
       if (event.event === 'market:ticker') {
-        void this.processPendingOrders(event.data);
+        void this.processMarketTick(event.data);
       }
     });
   }
@@ -215,6 +243,8 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
 
         const quantity = new Prisma.Decimal(request.quantity);
         this.validateQuantity(quantity, context.instrument);
+        const leverage = request.leverage ?? 1;
+        this.validateLeverage(leverage);
         this.validateOrderPrices(request, ticker, context.instrument);
         const order = await transaction.order.create({
           data: {
@@ -224,6 +254,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
             side: request.side,
             type: request.type,
             quantity,
+            leverage,
             requestedPrice:
               request.type === 'LIMIT' ? request.limitPrice : null,
             stopPrice: request.type === 'STOP' ? request.stopPrice : null,
@@ -322,6 +353,17 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
     return serializeOrder(order);
   }
 
+  private async processMarketTick(ticker: MarketTicker) {
+    try {
+      await this.processPendingOrders(ticker);
+      await this.processLiquidations(ticker);
+    } catch (error) {
+      this.logger.error(
+        `Market-tick processing failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+  }
+
   async processPendingOrders(ticker: MarketTicker) {
     if (ticker.status !== 'LIVE' || this.processingPendingOrders) return;
     this.processingPendingOrders = true;
@@ -356,11 +398,19 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
           await this.fillAcceptedOrder(order.id, ticker);
         } catch (error) {
           if (error instanceof UnprocessableEntityException) {
+            const response = error.getResponse();
+            const rejectionCode =
+              typeof response === 'object' &&
+              response !== null &&
+              'code' in response &&
+              typeof response.code === 'string'
+                ? response.code
+                : 'ORDER_RISK_REJECTED';
             await this.database.client.order.updateMany({
               where: { id: order.id, status: 'ACCEPTED' },
               data: {
                 status: 'REJECTED',
-                rejectionCode: 'INSUFFICIENT_BUYING_POWER',
+                rejectionCode,
                 triggeredAt: new Date(),
               },
             });
@@ -372,6 +422,54 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
       }
     } finally {
       this.processingPendingOrders = false;
+    }
+  }
+
+  async processLiquidations(ticker: MarketTicker) {
+    if (ticker.status !== 'LIVE' || this.processingLiquidations) return;
+    this.processingLiquidations = true;
+    try {
+      const positions = await this.database.client.position.findMany({
+        where: {
+          signedQuantity: { not: 0 },
+          instrument: { symbol: ticker.symbol },
+          account: {
+            status: AccountStatus.ACTIVE,
+            user: { status: UserStatus.ACTIVE },
+          },
+        },
+        include: { account: true },
+      });
+
+      for (const position of positions) {
+        const unrealizedPnl = position.averageEntryPrice
+          ? calculateUnrealizedPnl({
+              averageEntryPrice: position.averageEntryPrice.toString(),
+              markPrice: ticker.price,
+              signedQuantity: position.signedQuantity.toString(),
+            })
+          : '0';
+        const usedMargin = calculatePositionMargin({
+          signedQuantity: position.signedQuantity.toString(),
+          markPrice: ticker.price,
+          leverage: position.leverage.toString(),
+        });
+        const metrics = calculateAccountMetrics({
+          balance: position.account.balance.toString(),
+          unrealizedPnl,
+          usedMargin,
+        });
+        if (metrics.riskState !== 'LIQUIDATION') continue;
+        try {
+          await this.liquidatePosition(position.id, ticker);
+        } catch (error) {
+          this.logger.error(
+            `Could not liquidate position ${position.id}: ${error instanceof Error ? error.message : 'unknown error'}`,
+          );
+        }
+      }
+    } finally {
+      this.processingLiquidations = false;
     }
   }
 
@@ -402,6 +500,77 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
           user: order.account.user,
           account: order.account,
           instrument: order.instrument,
+        },
+        order,
+        ticker,
+      );
+    });
+  }
+
+  private async liquidatePosition(positionId: string, ticker: MarketTicker) {
+    await this.inSerializableTransaction(async (transaction) => {
+      const position = await transaction.position.findUnique({
+        where: { id: positionId },
+        include: {
+          account: { include: { user: true } },
+          instrument: true,
+        },
+      });
+      if (
+        !position ||
+        position.signedQuantity.isZero() ||
+        position.account.status !== AccountStatus.ACTIVE ||
+        position.account.user.status !== UserStatus.ACTIVE
+      ) {
+        return;
+      }
+
+      const unrealizedPnl = position.averageEntryPrice
+        ? calculateUnrealizedPnl({
+            averageEntryPrice: position.averageEntryPrice.toString(),
+            markPrice: ticker.price,
+            signedQuantity: position.signedQuantity.toString(),
+          })
+        : '0';
+      const metrics = calculateAccountMetrics({
+        balance: position.account.balance.toString(),
+        unrealizedPnl,
+        usedMargin: calculatePositionMargin({
+          signedQuantity: position.signedQuantity.toString(),
+          markPrice: ticker.price,
+          leverage: position.leverage.toString(),
+        }),
+      });
+      if (metrics.riskState !== 'LIQUIDATION') return;
+
+      await transaction.order.updateMany({
+        where: {
+          accountId: position.accountId,
+          instrumentId: position.instrumentId,
+          status: 'ACCEPTED',
+        },
+        data: { status: 'CANCELLED' },
+      });
+      const order = await transaction.order.create({
+        data: {
+          accountId: position.accountId,
+          instrumentId: position.instrumentId,
+          clientOrderId: `liquidation:${position.id}:${position.updatedAt.getTime()}`,
+          side: position.signedQuantity.isPositive() ? 'SELL' : 'BUY',
+          type: 'MARKET',
+          quantity: position.signedQuantity.abs(),
+          leverage: position.leverage,
+          status: 'PENDING',
+          purpose: 'LIQUIDATION',
+          reduceOnly: true,
+        },
+      });
+      await this.fillOrder(
+        transaction,
+        {
+          user: position.account.user,
+          account: position.account,
+          instrument: position.instrument,
         },
         order,
         ticker,
@@ -444,6 +613,20 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
     );
     const currentSignedQuantity =
       currentPosition?.signedQuantity ?? new Prisma.Decimal(0);
+    const signedFill = order.side === 'BUY' ? quantity : quantity.negated();
+    const addsToExistingPosition =
+      !currentSignedQuantity.isZero() &&
+      currentSignedQuantity.isPositive() === signedFill.isPositive();
+    if (
+      addsToExistingPosition &&
+      currentPosition &&
+      !currentPosition.leverage.equals(order.leverage)
+    ) {
+      throw new UnprocessableEntityException({
+        code: 'POSITION_LEVERAGE_MISMATCH',
+        message: `Use ${currentPosition.leverage.toString()}× leverage while adding to this position`,
+      });
+    }
     const result = applyFillToPosition({
       signedQuantity: currentSignedQuantity.toString(),
       averageEntryPrice: currentPosition?.averageEntryPrice?.toString() ?? null,
@@ -453,6 +636,15 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
     });
     const nextSignedQuantity = new Prisma.Decimal(result.signedQuantity);
     const realizedPnlDelta = new Prisma.Decimal(result.realizedPnlDelta);
+    const reversesPosition =
+      !currentSignedQuantity.isZero() &&
+      !nextSignedQuantity.isZero() &&
+      currentSignedQuantity.isPositive() !== nextSignedQuantity.isPositive();
+    const nextLeverage = nextSignedQuantity.isZero()
+      ? new Prisma.Decimal(1)
+      : currentPosition && !reversesPosition
+        ? currentPosition.leverage
+        : order.leverage;
     if (!order.reduceOnly) {
       this.validateBuyingPower({
         accountBalance: context.account.balance,
@@ -465,6 +657,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
         fillPrice,
         side: order.side,
         realizedPnlDelta,
+        leverage: nextLeverage,
       });
     }
 
@@ -475,6 +668,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
             signedQuantity: nextSignedQuantity,
             averageEntryPrice: result.averageEntryPrice,
             realizedPnl: { increment: realizedPnlDelta },
+            leverage: nextLeverage,
           },
         })
       : await transaction.position.create({
@@ -484,6 +678,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
             signedQuantity: nextSignedQuantity,
             averageEntryPrice: result.averageEntryPrice,
             realizedPnl: realizedPnlDelta,
+            leverage: nextLeverage,
           },
         });
     const filledOrder = await transaction.order.update({
@@ -511,21 +706,46 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
     });
 
     if (!realizedPnlDelta.isZero()) {
+      const uncappedBalance = context.account.balance.plus(realizedPnlDelta);
+      const balanceAfter = Prisma.Decimal.max(0, uncappedBalance);
+      const appliedBalanceDelta = balanceAfter.minus(context.account.balance);
+      const negativeBalanceProtected = uncappedBalance.isNegative();
       const updatedAccount = await transaction.account.update({
         where: { id: context.account.id },
-        data: { balance: { increment: realizedPnlDelta } },
+        data: { balance: balanceAfter },
       });
       await transaction.ledgerEntry.create({
         data: {
           accountId: context.account.id,
           type: 'REALIZED_PNL',
-          amount: realizedPnlDelta,
+          amount: appliedBalanceDelta,
           balanceAfter: updatedAccount.balance,
           referenceType: 'TRADE',
           referenceId: trade.id,
           idempotencyKey: `trade-realized:${trade.id}`,
+          metadata: negativeBalanceProtected
+            ? {
+                rawRealizedPnl: realizedPnlDelta.toString(),
+                protectedAmount: uncappedBalance.abs().toString(),
+                negativeBalanceProtection: true,
+              }
+            : undefined,
         },
       });
+      if (negativeBalanceProtected) {
+        await transaction.auditEvent.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'NEGATIVE_BALANCE_PROTECTED',
+            resourceType: 'ACCOUNT',
+            resourceId: context.account.id,
+            metadata: {
+              rawRealizedPnl: realizedPnlDelta.toString(),
+              protectedAmount: uncappedBalance.abs().toString(),
+            },
+          },
+        });
+      }
     }
 
     if (order.ocoGroupId) {
@@ -545,6 +765,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
         filledOrder,
         nextSignedQuantity,
         fillPrice,
+        nextLeverage,
       );
     }
 
@@ -584,6 +805,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
     parentOrder: Prisma.OrderGetPayload<object>,
     nextSignedQuantity: Prisma.Decimal,
     fillPrice: Prisma.Decimal,
+    leverage: Prisma.Decimal,
   ) {
     const existing = await transaction.order.findMany({
       where: {
@@ -632,6 +854,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
           side,
           type: 'STOP',
           quantity,
+          leverage,
           stopPrice: stopLossPrice,
           status: 'ACCEPTED',
           purpose: 'STOP_LOSS',
@@ -650,6 +873,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
           side,
           type: 'LIMIT',
           quantity,
+          leverage,
           requestedPrice: takeProfitPrice,
           status: 'ACCEPTED',
           purpose: 'TAKE_PROFIT',
@@ -811,6 +1035,19 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
+  private validateLeverage(leverage: number) {
+    if (
+      !SUPPORTED_LEVERAGE.includes(
+        leverage as (typeof SUPPORTED_LEVERAGE)[number],
+      )
+    ) {
+      throw new BadRequestException({
+        code: 'INVALID_LEVERAGE',
+        message: 'Leverage must be one of 1×, 2×, 5×, or 10×',
+      });
+    }
+  }
+
   private validateOrderPrices(
     request: OrderPlacementRequest,
     ticker: MarketTicker,
@@ -895,6 +1132,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
     fillPrice: Prisma.Decimal;
     side: 'BUY' | 'SELL';
     realizedPnlDelta: Prisma.Decimal;
+    leverage: Prisma.Decimal;
   }) {
     const signedFill =
       input.side === 'BUY' ? input.fillQuantity : input.fillQuantity.negated();
@@ -911,8 +1149,11 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
           .mul(input.nextSignedQuantity)
       : new Prisma.Decimal(0);
     const equity = nextBalance.plus(nextUnrealized);
-    const notional = input.nextSignedQuantity.abs().mul(input.fillPrice);
-    if (equity.lessThanOrEqualTo(0) || notional.greaterThan(equity)) {
+    const usedMargin = input.nextSignedQuantity
+      .abs()
+      .mul(input.fillPrice)
+      .div(input.leverage);
+    if (equity.lessThanOrEqualTo(0) || usedMargin.greaterThan(equity)) {
       throw new UnprocessableEntityException({
         code: 'INSUFFICIENT_BUYING_POWER',
         message: 'This order exceeds the available 1× demo buying power',

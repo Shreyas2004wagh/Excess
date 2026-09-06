@@ -29,6 +29,9 @@ const orderBase = z.object({
   symbol: z.literal('BTC-USD'),
   side: z.enum(['BUY', 'SELL']),
   quantity: decimalString,
+  leverage: z
+    .union([z.literal(1), z.literal(2), z.literal(5), z.literal(10)])
+    .optional(),
   stopLossPrice: decimalString.optional(),
   takeProfitPrice: decimalString.optional(),
 });
