@@ -10,6 +10,17 @@ export interface HealthResponse {
   timestamp: string;
 }
 
+export interface ReadinessResponse {
+  service: 'excess-api';
+  status: 'ready' | 'not_ready';
+  checks: {
+    database: 'up' | 'down';
+    redis: 'up' | 'down';
+    marketData: 'up' | 'down';
+  };
+  timestamp: string;
+}
+
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderType = 'MARKET' | 'LIMIT' | 'STOP';
 export type OrderStatus =

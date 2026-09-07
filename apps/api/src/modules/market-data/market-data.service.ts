@@ -74,6 +74,18 @@ export class MarketDataService
     return this.ticker;
   }
 
+  isReady(maximumAgeMilliseconds = 30_000) {
+    if (!this.ticker || this.ticker.status !== 'LIVE') {
+      return false;
+    }
+
+    const updatedAt = Date.parse(this.ticker.updatedAt);
+    return (
+      Number.isFinite(updatedAt) &&
+      Date.now() - updatedAt <= maximumAgeMilliseconds
+    );
+  }
+
   async getInstrument(symbol: string): Promise<MarketInstrumentSummary> {
     this.assertSupportedSymbol(symbol);
     const instrument = await this.database.client.instrument.findUnique({

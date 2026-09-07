@@ -42,8 +42,10 @@ development application. Clerk writes credentials to the ignored
 `apps/web/.env.local` file. Enable email/password and Google in the development
 instance before testing sign-in.
 
-The web application runs at `http://localhost:3000`. The API health endpoint is
-available at `http://localhost:4000/api/v1/health`.
+The web application runs at `http://localhost:3000`. The API liveness endpoint is
+available at `http://localhost:4000/api/v1/health`; the deployment readiness probe
+is `http://localhost:4000/api/v1/health/ready`. Readiness requires PostgreSQL,
+Redis, and a fresh live market-data ticker.
 
 After signing in, open `http://localhost:3000/terminal` for the live BTC-USD
 five-minute candlestick chart and leveraged paper-trading order ticket. Market
@@ -60,6 +62,13 @@ without an external feed.
 One-shot price alerts can watch for a move above or below a BTC-USD target. A
 trigger is recorded atomically with an outbox delivery event so repeated or
 concurrent ticker processing cannot notify twice.
+
+Authenticated API traffic is protected by a Redis-backed fixed-window rate limit,
+with a per-process in-memory fallback when Redis cannot be reached. Configure the
+quota with `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_SECONDS`. Every HTTP response
+includes a correlation ID and defensive browser headers, and every completed API
+request produces a structured log record. Liveness and readiness probes are exempt
+from rate limiting.
 
 The authenticated trading interface is:
 
@@ -91,7 +100,8 @@ corepack pnpm test:e2e
 6. Pending orders: limit, stop, stop-loss, and take-profit — complete for BTC-USD
 7. Leverage, margin, liquidation, and negative-balance protection — complete for BTC-USD
 8. Persistent one-shot price alerts — complete for BTC-USD
-9. Administration, observability, rate limiting, and production hardening
+9. Request correlation, structured logging, rate limiting, and readiness — complete
+10. Administration, alert delivery, observability, deployment, and load testing
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.

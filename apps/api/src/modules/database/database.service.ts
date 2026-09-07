@@ -12,4 +12,13 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy() {
     await this.client.$disconnect();
   }
+
+  async ping() {
+    try {
+      await this.client.$queryRaw`SELECT 1`;
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }

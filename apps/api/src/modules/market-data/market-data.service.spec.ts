@@ -55,7 +55,7 @@ class FakeProvider implements MarketDataProvider {
       high24h: '66000',
       low24h: '64000',
       volume24h: '1200',
-      updatedAt: '2026-09-01T12:00:00.000Z',
+      updatedAt: new Date().toISOString(),
     };
   }
 
@@ -103,6 +103,7 @@ describe('MarketDataService', () => {
     expect(history.items[0]?.time).toBeLessThan(
       history.items.at(-1)?.time ?? 0,
     );
+    expect(service.isReady()).toBe(true);
   });
 
   it('broadcasts live ticker and current-candle updates', async () => {
