@@ -31,4 +31,14 @@ describe('validateEnvironment', () => {
       }),
     ).toThrow('CLERK_WEBHOOK_SIGNING_SECRET');
   });
+
+  it('loads safe rate-limit defaults and validates overrides', () => {
+    expect(validateEnvironment(requiredEnvironment)).toMatchObject({
+      RATE_LIMIT_MAX: 120,
+      RATE_LIMIT_WINDOW_SECONDS: 60,
+    });
+    expect(() =>
+      validateEnvironment({ ...requiredEnvironment, RATE_LIMIT_MAX: 0 }),
+    ).toThrow('RATE_LIMIT_MAX');
+  });
 });
