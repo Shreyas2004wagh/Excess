@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { DatabaseModule } from './modules/database/database.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { MarketDataModule } from './modules/market-data/market-data.module.js';
+import { OperationalModule } from './modules/operational/operational.module.js';
 import { RedisModule } from './modules/redis/redis.module.js';
 import { AccountsModule } from './modules/accounts/accounts.module.js';
 import { SessionModule } from './modules/session/session.module.js';
@@ -30,6 +31,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
     MarketDataModule,
     TradingModule,
     AlertsModule,
+    OperationalModule,
   ],
 })
 export class AppModule {}

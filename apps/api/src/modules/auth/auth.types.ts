@@ -7,6 +7,7 @@ export interface ClerkIdentity {
 
 export interface AuthenticatedRequest extends Request {
   identity: ClerkIdentity;
+  requestId: string;
 }
 
 export interface ClerkUserProfile {
