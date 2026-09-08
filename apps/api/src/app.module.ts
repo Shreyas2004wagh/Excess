@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
 import { validateEnvironment } from './config/environment.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 import { AlertsModule } from './modules/alerts/alerts.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { DatabaseModule } from './modules/database/database.module.js';
@@ -33,6 +34,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
     TradingModule,
     AlertsModule,
     NotificationsModule,
+    AdminModule,
     OperationalModule,
   ],
 })
