@@ -37,6 +37,8 @@ export default async function globalTeardown() {
             'ORDER_FILLED',
             'NEGATIVE_BALANCE_PROTECTED',
             'PRICE_ALERT_TRIGGERED',
+            'IN_APP_NOTIFICATION_DELIVERED',
+            'OUTBOX_DELIVERY_RETRIED',
           ],
         },
       },
@@ -54,6 +56,10 @@ export default async function globalTeardown() {
         data: { balance: account.initialBalance },
       }),
     ),
+    prisma.user.update({
+      where: { id: user.id },
+      data: { role: 'TRADER' },
+    }),
   ]);
   await prisma.$disconnect();
 }

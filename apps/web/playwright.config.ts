@@ -14,7 +14,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        'MARKET_DATA_PROVIDER=mock corepack pnpm --filter @excess/api dev',
+        'MARKET_DATA_PROVIDER=mock ADMIN_EMAILS="$E2E_CLERK_USER_EMAIL" corepack pnpm --filter @excess/api dev',
       url: 'http://localhost:4000/api/v1/health',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

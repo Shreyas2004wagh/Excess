@@ -1,5 +1,6 @@
 import { clerk, setupClerkTestingToken } from '@clerk/testing/playwright';
 import { expect, test } from '@playwright/test';
+import { prisma } from '@excess/database';
 
 test('redirects an unauthenticated visitor away from the dashboard', async ({
   page,
@@ -94,4 +95,72 @@ test('renders the authenticated live BTC-USD terminal', async ({ page }) => {
   await expect(
     page.getByText('No active or triggered alerts yet.'),
   ).toBeVisible();
+});
+
+test('delivers a triggered alert to the in-app notification center', async ({
+  page,
+}) => {
+  const email = process.env.E2E_CLERK_USER_EMAIL;
+  if (!email) throw new Error('E2E_CLERK_USER_EMAIL is required');
+
+  await setupClerkTestingToken({ page });
+  await page.goto('/');
+  await clerk.signIn({ page, emailAddress: email });
+  await page.goto('/dashboard');
+
+  const [user, instrument] = await Promise.all([
+    prisma.user.findFirstOrThrow({ where: { email } }),
+    prisma.instrument.findUniqueOrThrow({ where: { symbol: 'BTC-USD' } }),
+  ]);
+  const alert = await prisma.priceAlert.create({
+    data: {
+      userId: user.id,
+      instrumentId: instrument.id,
+      direction: 'ABOVE',
+      targetPrice: '65000',
+      status: 'TRIGGERED',
+      triggeredPrice: '65001',
+      triggeredAt: new Date(),
+    },
+  });
+  await prisma.outboxEvent.create({
+    data: {
+      aggregateType: 'PRICE_ALERT',
+      aggregateId: alert.id,
+      eventType: 'PRICE_ALERT_TRIGGERED',
+      payload: {
+        alertId: alert.id,
+        userId: user.id,
+        symbol: 'BTC-USD',
+        direction: 'ABOVE',
+        targetPrice: '65000',
+        triggeredPrice: '65001',
+      },
+    },
+  });
+
+  await page.goto('/notifications');
+  await expect(
+    page.getByText('BTC-USD price alert triggered', { exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Mark read', exact: true }).click();
+  await expect(page.getByText('Read', { exact: true })).toBeVisible();
+});
+
+test('renders the protected administration console for an allowlisted user', async ({
+  page,
+}) => {
+  const email = process.env.E2E_CLERK_USER_EMAIL;
+  if (!email) throw new Error('E2E_CLERK_USER_EMAIL is required');
+
+  await setupClerkTestingToken({ page });
+  await page.goto('/');
+  await clerk.signIn({ page, emailAddress: email });
+  await page.goto('/admin');
+
+  await expect(
+    page.getByRole('heading', { name: 'Administration console' }),
+  ).toBeVisible();
+  await expect(page.getByTestId('admin-console')).toBeVisible();
+  await expect(page.getByText('Alert delivery pipeline')).toBeVisible();
 });
