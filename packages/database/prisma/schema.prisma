@@ -12,6 +12,11 @@ enum UserStatus {
   SUSPENDED
 }
 
+enum UserRole {
+  TRADER
+  ADMIN
+}
+
 enum AccountType {
   DEMO
 }
@@ -64,6 +69,7 @@ enum LedgerEntryType {
 
 enum OutboxStatus {
   PENDING
+  PROCESSING
   PUBLISHED
   FAILED
 }
@@ -80,16 +86,18 @@ enum PriceAlertStatus {
 }
 
 model User {
-  id                String       @id @default(uuid()) @db.Uuid
-  clerkId           String       @unique
+  id                String         @id @default(uuid()) @db.Uuid
+  clerkId           String         @unique
   email             String
   displayName       String?
-  status            UserStatus   @default(ACTIVE)
+  status            UserStatus     @default(ACTIVE)
+  role              UserRole       @default(TRADER)
   identityDeletedAt DateTime?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
   accounts          Account[]
   auditEvents       AuditEvent[]
+  notifications     Notification[]
   priceAlerts       PriceAlert[]
 
   @@index([email])
@@ -248,18 +256,40 @@ model Position {
 }
 
 model OutboxEvent {
-  id            String       @id @default(uuid()) @db.Uuid
+  id            String        @id @default(uuid()) @db.Uuid
   aggregateType String
   aggregateId   String
   eventType     String
   payload       Json
-  status        OutboxStatus @default(PENDING)
-  attempts      Int          @default(0)
+  status        OutboxStatus  @default(PENDING)
+  attempts      Int           @default(0)
+  nextAttemptAt DateTime      @default(now())
+  claimedAt     DateTime?
+  lastError     String?
   publishedAt   DateTime?
-  createdAt     DateTime     @default(now())
+  createdAt     DateTime      @default(now())
+  notification  Notification?
 
   @@index([status, createdAt])
+  @@index([status, nextAttemptAt, createdAt])
   @@index([aggregateType, aggregateId])
+}
+
+model Notification {
+  id            String      @id @default(uuid()) @db.Uuid
+  userId        String      @db.Uuid
+  outboxEventId String      @unique @db.Uuid
+  type          String
+  title         String
+  message       String
+  metadata      Json?
+  readAt        DateTime?
+  createdAt     DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id])
+  outboxEvent   OutboxEvent @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt])
 }
 
 model AuditEvent {

@@ -3,6 +3,7 @@ export type Leverage = 1 | 2 | 5 | 10;
 export type RiskState = 'HEALTHY' | 'MARGIN_WARNING' | 'LIQUIDATION';
 export type PriceAlertDirection = 'ABOVE' | 'BELOW';
 export type PriceAlertStatus = 'ACTIVE' | 'TRIGGERED' | 'CANCELLED';
+export type UserRole = 'TRADER' | 'ADMIN';
 
 export interface HealthResponse {
   service: 'excess-api';
@@ -43,6 +44,7 @@ export interface UserProfileSummary {
   email: string;
   displayName: string | null;
   status: UserStatus;
+  role: UserRole;
 }
 
 export interface DemoAccountSummary {
@@ -188,7 +190,7 @@ export interface PriceAlertSummary {
   direction: PriceAlertDirection;
   targetPrice: DecimalString;
   status: PriceAlertStatus;
-  deliveryStatus: 'PENDING' | 'PUBLISHED' | 'FAILED' | null;
+  deliveryStatus: 'PENDING' | 'PROCESSING' | 'PUBLISHED' | 'FAILED' | null;
   triggeredPrice: DecimalString | null;
   triggeredAt: string | null;
   createdAt: string;
@@ -197,6 +199,73 @@ export interface PriceAlertSummary {
 
 export interface PriceAlertsResponse {
   items: PriceAlertSummary[];
+}
+
+export interface NotificationSummary {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  metadata: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationsResponse {
+  items: NotificationSummary[];
+  unreadCount: number;
+}
+
+export interface AdminDeliverySummary {
+  id: string;
+  aggregateId: string;
+  eventType: string;
+  status: 'PENDING' | 'PROCESSING' | 'PUBLISHED' | 'FAILED';
+  attempts: number;
+  lastError: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+}
+
+export interface AdminUserSummary {
+  id: string;
+  email: string;
+  displayName: string | null;
+  status: UserStatus;
+  role: UserRole;
+  createdAt: string;
+}
+
+export interface AdminAuditSummary {
+  id: string;
+  actorEmail: string | null;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  createdAt: string;
+}
+
+export interface AdminOverviewResponse {
+  system: ReadinessResponse;
+  totals: {
+    users: number;
+    activeUsers: number;
+    demoAccounts: number;
+    openOrders: number;
+    openPositions: number;
+    activePriceAlerts: number;
+    unreadNotifications: number;
+  };
+  deliveries: {
+    pending: number;
+    processing: number;
+    published: number;
+    failed: number;
+  };
+  recentDeliveries: AdminDeliverySummary[];
+  recentUsers: AdminUserSummary[];
+  recentAuditEvents: AdminAuditSummary[];
+  generatedAt: string;
 }
 
 export type MarketDataStatus = 'CONNECTING' | 'LIVE' | 'STALE' | 'OFFLINE';
