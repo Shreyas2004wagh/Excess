@@ -36,6 +36,7 @@ describe('validateEnvironment', () => {
     expect(validateEnvironment(requiredEnvironment)).toMatchObject({
       RATE_LIMIT_MAX: 120,
       RATE_LIMIT_WINDOW_SECONDS: 60,
+      ADMIN_EMAILS: '',
     });
     expect(() =>
       validateEnvironment({ ...requiredEnvironment, RATE_LIMIT_MAX: 0 }),

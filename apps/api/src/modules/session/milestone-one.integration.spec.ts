@@ -81,6 +81,7 @@ describe('Milestone 1 account lifecycle', () => {
       baseCurrency: 'USD',
       type: 'DEMO',
     });
+    expect(results[0]?.user.role).toBe('TRADER');
 
     const user = await database.client.user.findUniqueOrThrow({
       where: { clerkId: clerkUserId },

@@ -16,6 +16,7 @@ const environmentSchema = z
     REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
     RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+    ADMIN_EMAILS: z.string().default(''),
     MARKET_DATA_PROVIDER: z.enum(['coinbase', 'mock']).default('coinbase'),
     COINBASE_REST_URL: z.url().default('https://api.exchange.coinbase.com'),
     COINBASE_WS_URL: z.url().default('wss://advanced-trade-ws.coinbase.com'),

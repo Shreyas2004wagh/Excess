@@ -67,7 +67,12 @@ export class WebhooksService {
       await this.database.client.user.updateMany({
         where: { clerkId: event.data.id },
         data: {
-          ...(email ? { email } : {}),
+          ...(email
+            ? {
+                email,
+                role: this.isAdministratorEmail(email) ? 'ADMIN' : 'TRADER',
+              }
+            : {}),
           displayName: getDisplayName(event.data),
         },
       });
@@ -82,5 +87,13 @@ export class WebhooksService {
         },
       });
     }
+  }
+
+  private isAdministratorEmail(email: string) {
+    return (this.config.get<string>('ADMIN_EMAILS') ?? '')
+      .split(',')
+      .map((configuredEmail) => configuredEmail.trim().toLowerCase())
+      .filter(Boolean)
+      .includes(email.toLowerCase());
   }
 }

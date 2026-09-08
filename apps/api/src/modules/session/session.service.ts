@@ -2,13 +2,16 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Optional,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   AccountType,
   Prisma,
   UserStatus,
+  UserRole,
   type Account,
   type User,
 } from '@excess/database';
@@ -28,6 +31,7 @@ function serialize(user: User, account: Account): SessionBootstrapResponse {
       email: user.email,
       displayName: user.displayName,
       status: user.status,
+      role: user.role,
     },
     account: {
       id: account.id,
@@ -53,6 +57,7 @@ export class SessionService {
   constructor(
     private readonly database: DatabaseService,
     @Inject(CLERK_GATEWAY) private readonly clerk: ClerkGateway,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   async bootstrap(identity: ClerkIdentity): Promise<SessionBootstrapResponse> {
@@ -64,6 +69,7 @@ export class SessionService {
       });
     }
     const email = profile.email;
+    const administrator = this.isAdministratorEmail(email);
 
     for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
       try {
@@ -75,10 +81,12 @@ export class SessionService {
                 clerkId: profile.clerkUserId,
                 email,
                 displayName: profile.displayName,
+                role: administrator ? UserRole.ADMIN : UserRole.TRADER,
               },
               update: {
                 email,
                 displayName: profile.displayName,
+                role: administrator ? UserRole.ADMIN : UserRole.TRADER,
               },
             });
 
@@ -140,6 +148,15 @@ export class SessionService {
     throw new ServiceUnavailableException(
       'Could not provision the demo account',
     );
+  }
+
+  private isAdministratorEmail(email: string) {
+    const configuredEmails = this.config?.get<string>('ADMIN_EMAILS') ?? '';
+    return configuredEmails
+      .split(',')
+      .map((configuredEmail) => configuredEmail.trim().toLowerCase())
+      .filter(Boolean)
+      .includes(email.toLowerCase());
   }
 }
 import { setTimeout as delay } from 'node:timers/promises';
