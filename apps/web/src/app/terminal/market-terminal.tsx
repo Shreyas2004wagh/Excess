@@ -522,6 +522,9 @@ export function MarketTerminal({
           <Link className="button button-secondary" href="/dashboard">
             Dashboard
           </Link>
+          <Link className="button button-secondary" href="/notifications">
+            Notifications
+          </Link>
           <UserButton />
         </div>
       </nav>

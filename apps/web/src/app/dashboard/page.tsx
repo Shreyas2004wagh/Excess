@@ -7,8 +7,10 @@ import {
   bootstrapSession,
   ExcessApiError,
   getLedger,
+  getNotifications,
 } from '../../lib/excess-api';
 import { formatCurrency, formatDate } from '../../lib/format';
+import { NotificationCenter } from '../notifications/notification-center';
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -23,7 +25,10 @@ export default async function DashboardPage() {
 
   try {
     const bootstrap = await bootstrapSession(token);
-    const ledger = await getLedger(token);
+    const [ledger, notifications] = await Promise.all([
+      getLedger(token),
+      getNotifications(token),
+    ]);
     const { user, account } = bootstrap;
 
     return (
@@ -36,6 +41,14 @@ export default async function DashboardPage() {
             EXCESS
           </Link>
           <div className="flex items-center gap-3">
+            <Link className="button button-secondary" href="/notifications">
+              Notifications
+            </Link>
+            {user.role === 'ADMIN' ? (
+              <Link className="button button-secondary" href="/admin">
+                Admin
+              </Link>
+            ) : null}
             <span className="hidden text-sm text-[var(--muted)] sm:inline">
               {user.email}
             </span>
@@ -92,8 +105,8 @@ export default async function DashboardPage() {
                 BTC-USD terminal is live.
               </h2>
               <p className="mt-3 leading-7 text-[var(--muted)]">
-                Follow Coinbase prices and five-minute candles in real time.
-                Order entry remains safely disabled until the next milestone.
+                Follow Coinbase prices and five-minute candles, place simulated
+                orders, and monitor margin in real time.
               </p>
               <Link className="button button-primary mt-7" href="/terminal">
                 Open terminal
@@ -128,6 +141,10 @@ export default async function DashboardPage() {
               ))}
             </div>
           </article>
+
+          <div className="mt-4">
+            <NotificationCenter initialNotifications={notifications} />
+          </div>
         </section>
       </main>
     );

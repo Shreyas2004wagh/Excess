@@ -1,10 +1,14 @@
 import type {
   CandleHistoryResponse,
+  AdminDeliverySummary,
+  AdminOverviewResponse,
   CreatePriceAlertRequest,
   LedgerPage,
   MarketOrderRequest,
   MarketOrderResponse,
   MarketInstrumentSummary,
+  NotificationSummary,
+  NotificationsResponse,
   OpenOrdersResponse,
   OrderPlacementRequest,
   OrderPlacementResponse,
@@ -135,4 +139,34 @@ export function cancelPriceAlert(token: string, alertId: string) {
   return request<PriceAlertSummary>(`/alerts/${alertId}`, token, {
     method: 'DELETE',
   });
+}
+
+export function getNotifications(token: string) {
+  return request<NotificationsResponse>('/notifications', token);
+}
+
+export function markNotificationRead(token: string, notificationId: string) {
+  return request<NotificationSummary>(
+    `/notifications/${notificationId}/read`,
+    token,
+    { method: 'PATCH' },
+  );
+}
+
+export function markAllNotificationsRead(token: string) {
+  return request<NotificationsResponse>('/notifications/read-all', token, {
+    method: 'POST',
+  });
+}
+
+export function getAdminOverview(token: string) {
+  return request<AdminOverviewResponse>('/admin/overview', token);
+}
+
+export function retryAdminDelivery(token: string, eventId: string) {
+  return request<AdminDeliverySummary>(
+    `/admin/deliveries/${eventId}/retry`,
+    token,
+    { method: 'POST' },
+  );
 }
