@@ -61,7 +61,14 @@ without an external feed.
 
 One-shot price alerts can watch for a move above or below a BTC-USD target. A
 trigger is recorded atomically with an outbox delivery event so repeated or
-concurrent ticker processing cannot notify twice.
+concurrent ticker processing cannot notify twice. The in-process outbox dispatcher
+claims those events with recoverable leases, retries failures with exponential
+backoff, and creates exactly one durable in-app notification per trigger.
+
+Set `ADMIN_EMAILS` to a comma-separated list of verified Clerk email addresses to
+grant the persisted `ADMIN` role during session bootstrap. Administrators can open
+`/admin` to inspect account activity and delivery health or requeue a failed event;
+ordinary traders receive a stable `403` from the administration API.
 
 Authenticated API traffic is protected by a Redis-backed fixed-window rate limit,
 with a per-process in-memory fallback when Redis cannot be reached. Configure the
@@ -79,6 +86,11 @@ The authenticated trading interface is:
 - `POST /api/v1/alerts` — create a one-shot BTC-USD price alert
 - `GET /api/v1/alerts` — list active, triggered, and cancelled alerts
 - `DELETE /api/v1/alerts/:alertId` — cancel an active alert
+- `GET /api/v1/notifications` — list recent in-app notifications and unread count
+- `PATCH /api/v1/notifications/:notificationId/read` — mark one notification read
+- `POST /api/v1/notifications/read-all` — mark every notification read
+- `GET /api/v1/admin/overview` — load administrator operations metrics
+- `POST /api/v1/admin/deliveries/:eventId/retry` — requeue a failed delivery
 
 ## Quality checks
 
@@ -101,7 +113,8 @@ corepack pnpm test:e2e
 7. Leverage, margin, liquidation, and negative-balance protection — complete for BTC-USD
 8. Persistent one-shot price alerts — complete for BTC-USD
 9. Request correlation, structured logging, rate limiting, and readiness — complete
-10. Administration, alert delivery, observability, deployment, and load testing
+10. Durable in-app alert delivery and administration — complete
+11. Email delivery, external observability, deployment, and load testing
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.
