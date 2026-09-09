@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { UserRole, UserStatus, type OutboxEvent } from '@excess/database';
+import { UserRole, UserStatus, type Prisma } from '@excess/database';
 import type {
   AdminDeliverySummary,
   AdminOverviewResponse,
@@ -14,7 +14,13 @@ import type { ClerkIdentity } from '../auth/auth.types.js';
 import { DatabaseService } from '../database/database.service.js';
 import { HealthService } from '../health/health.service.js';
 
-function serializeDelivery(event: OutboxEvent): AdminDeliverySummary {
+type DeliveryWithNotification = Prisma.OutboxEventGetPayload<{
+  include: { notification: true };
+}>;
+
+function serializeDelivery(
+  event: DeliveryWithNotification,
+): AdminDeliverySummary {
   return {
     id: event.id,
     aggregateId: event.aggregateId,
@@ -22,6 +28,10 @@ function serializeDelivery(event: OutboxEvent): AdminDeliverySummary {
     status: event.status,
     attempts: event.attempts,
     lastError: event.lastError,
+    emailStatus: event.notification?.emailStatus ?? null,
+    emailAttempts: event.notification?.emailAttempts ?? 0,
+    emailLastError: event.notification?.emailLastError ?? null,
+    emailSentAt: event.notification?.emailSentAt?.toISOString() ?? null,
     createdAt: event.createdAt.toISOString(),
     publishedAt: event.publishedAt?.toISOString() ?? null,
   };
@@ -48,6 +58,10 @@ export class AdminService {
       processing,
       published,
       failed,
+      emailDisabled,
+      emailPending,
+      emailSent,
+      emailFailed,
       recentDeliveries,
       recentUsers,
       recentAuditEvents,
@@ -78,10 +92,23 @@ export class AdminService {
       this.database.client.outboxEvent.count({
         where: { aggregateType: 'PRICE_ALERT', status: 'FAILED' },
       }),
+      this.database.client.notification.count({
+        where: { emailStatus: 'DISABLED' },
+      }),
+      this.database.client.notification.count({
+        where: { emailStatus: 'PENDING' },
+      }),
+      this.database.client.notification.count({
+        where: { emailStatus: 'SENT' },
+      }),
+      this.database.client.notification.count({
+        where: { emailStatus: 'FAILED' },
+      }),
       this.database.client.outboxEvent.findMany({
         where: { aggregateType: 'PRICE_ALERT' },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 20,
+        include: { notification: true },
       }),
       this.database.client.user.findMany({
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -115,6 +142,12 @@ export class AdminService {
         unreadNotifications,
       },
       deliveries: { pending, processing, published, failed },
+      emailDeliveries: {
+        disabled: emailDisabled,
+        pending: emailPending,
+        sent: emailSent,
+        failed: emailFailed,
+      },
       recentDeliveries: recentDeliveries.map(serializeDelivery),
       recentUsers: recentUsers.map((user) => ({
         ...user,
@@ -178,6 +211,7 @@ export class AdminService {
         });
         return transaction.outboxEvent.findUniqueOrThrow({
           where: { id: event.id },
+          include: { notification: true },
         });
       },
     );

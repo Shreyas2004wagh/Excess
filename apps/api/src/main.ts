@@ -6,7 +6,7 @@ import { requestContextMiddleware } from './modules/operational/request-context.
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
-  const port = Number(process.env.API_PORT ?? 4000);
+  const port = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
 
   if (process.env.NODE_ENV === 'production') {
     app.getHttpAdapter().getInstance().set('trust proxy', 1);
@@ -25,6 +25,7 @@ async function bootstrap() {
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
     credentials: true,
   });
+  app.enableShutdownHooks();
 
   await app.listen(port);
 }

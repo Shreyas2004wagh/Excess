@@ -8,6 +8,8 @@ import type { OutboxEvent } from '@excess/database';
 import { z } from 'zod';
 
 import { DatabaseService } from '../database/database.service.js';
+import { MetricsService } from '../operational/metrics.service.js';
+import { AlertEmailService } from './alert-email.service.js';
 
 const DISPATCH_INTERVAL_MILLISECONDS = 1_000;
 const CLAIM_LEASE_MILLISECONDS = 30_000;
@@ -37,7 +39,11 @@ export class OutboxDispatcherService
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
 
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly email: AlertEmailService,
+    private readonly metrics: MetricsService,
+  ) {}
 
   onApplicationBootstrap() {
     void this.runScheduledDispatch();
@@ -63,10 +69,12 @@ export class OutboxDispatcherService
     for (const event of events) {
       try {
         await this.publishEvent(event);
+        this.metrics.recordOutboxDispatch('published');
         published += 1;
       } catch (error) {
         failed += 1;
         await this.recordFailure(event, error);
+        this.metrics.recordOutboxDispatch('failed');
       }
     }
 
@@ -147,41 +155,103 @@ export class OutboxDispatcherService
     const title = `${payload.symbol} price alert triggered`;
     const message = `${payload.symbol} reached $${payload.triggeredPrice}, crossing ${payload.direction.toLowerCase()} your $${payload.targetPrice} target.`;
 
-    await this.database.client.$transaction(async (transaction) => {
-      await transaction.notification.upsert({
-        where: { outboxEventId: event.id },
-        create: {
-          userId: payload.userId,
-          outboxEventId: event.id,
-          type: event.eventType,
-          title,
+    const notification = await this.database.client.$transaction(
+      async (transaction) => {
+        const created = await transaction.notification.createMany({
+          data: {
+            userId: payload.userId,
+            outboxEventId: event.id,
+            type: event.eventType,
+            title,
+            message,
+            metadata: payload,
+            emailStatus: this.email.enabled ? 'PENDING' : 'DISABLED',
+          },
+          skipDuplicates: true,
+        });
+        if (created.count === 1) {
+          await transaction.auditEvent.create({
+            data: {
+              actorUserId: payload.userId,
+              action: 'IN_APP_NOTIFICATION_DELIVERED',
+              resourceType: 'OUTBOX_EVENT',
+              resourceId: event.id,
+              metadata: { alertId: payload.alertId },
+            },
+          });
+        }
+        return transaction.notification.findUniqueOrThrow({
+          where: { outboxEventId: event.id },
+          include: { user: { select: { email: true } } },
+        });
+      },
+    );
+
+    if (this.email.enabled && notification.emailStatus !== 'SENT') {
+      await this.database.client.notification.update({
+        where: { id: notification.id },
+        data: {
+          emailStatus: 'PENDING',
+          emailAttempts: { increment: 1 },
+          emailLastError: null,
+        },
+      });
+
+      try {
+        const providerId = await this.email.send({
+          to: notification.user.email,
+          subject: title,
           message,
-          metadata: payload,
-        },
-        update: {},
-      });
-      await transaction.auditEvent.create({
-        data: {
-          actorUserId: payload.userId,
-          action: 'IN_APP_NOTIFICATION_DELIVERED',
-          resourceType: 'OUTBOX_EVENT',
-          resourceId: event.id,
-          metadata: { alertId: payload.alertId },
-        },
-      });
-      const published = await transaction.outboxEvent.updateMany({
-        where: { id: event.id, status: 'PROCESSING' },
-        data: {
-          status: 'PUBLISHED',
-          publishedAt: new Date(),
-          claimedAt: null,
-          lastError: null,
-        },
-      });
-      if (published.count !== 1) {
-        throw new Error('Outbox claim was lost before publication');
+          outboxEventId: event.id,
+        });
+        await this.database.client.$transaction(async (transaction) => {
+          const sent = await transaction.notification.updateMany({
+            where: { id: notification.id, emailStatus: { not: 'SENT' } },
+            data: {
+              emailStatus: 'SENT',
+              emailProviderId: providerId,
+              emailLastError: null,
+              emailSentAt: new Date(),
+            },
+          });
+          if (sent.count === 1) {
+            await transaction.auditEvent.create({
+              data: {
+                actorUserId: payload.userId,
+                action: 'ALERT_EMAIL_DELIVERED',
+                resourceType: 'OUTBOX_EVENT',
+                resourceId: event.id,
+                metadata: { alertId: payload.alertId, providerId },
+              },
+            });
+          }
+        });
+        this.metrics.recordEmailAttempt('sent');
+      } catch (error) {
+        const emailError = (
+          error instanceof Error ? error.message : 'unknown email error'
+        ).slice(0, 1_000);
+        await this.database.client.notification.update({
+          where: { id: notification.id },
+          data: { emailStatus: 'FAILED', emailLastError: emailError },
+        });
+        this.metrics.recordEmailAttempt('failed');
+        throw error;
       }
+    }
+
+    const published = await this.database.client.outboxEvent.updateMany({
+      where: { id: event.id, status: 'PROCESSING' },
+      data: {
+        status: 'PUBLISHED',
+        publishedAt: new Date(),
+        claimedAt: null,
+        lastError: null,
+      },
     });
+    if (published.count !== 1) {
+      throw new Error('Outbox claim was lost before publication');
+    }
   }
 
   private async recordFailure(event: OutboxEvent, error: unknown) {

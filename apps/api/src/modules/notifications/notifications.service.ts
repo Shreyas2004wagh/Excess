@@ -31,6 +31,8 @@ function serializeNotification(
     title: notification.title,
     message: notification.message,
     metadata: metadataRecord(notification.metadata),
+    emailStatus: notification.emailStatus,
+    emailSentAt: notification.emailSentAt?.toISOString() ?? null,
     readAt: notification.readAt?.toISOString() ?? null,
     createdAt: notification.createdAt.toISOString(),
   };

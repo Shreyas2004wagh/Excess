@@ -6,8 +6,10 @@ import type { MarketTicker } from '@excess/shared-types';
 import type { ClerkGateway } from '../auth/auth.types.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { MarketDataService } from '../market-data/market-data.service.js';
+import { MetricsService } from '../operational/metrics.service.js';
 import { SessionService } from '../session/session.service.js';
 import { AlertsService } from '../alerts/alerts.service.js';
+import type { AlertEmailService } from './alert-email.service.js';
 import { NotificationsService } from './notifications.service.js';
 import { OutboxDispatcherService } from './outbox-dispatcher.service.js';
 
@@ -42,8 +44,21 @@ describe('Alert notification delivery', () => {
   const session = new SessionService(database, clerk);
   const alerts = new AlertsService(database, marketData);
   const notifications = new NotificationsService(database);
-  const dispatcher = new OutboxDispatcherService(database);
-  const competingDispatcher = new OutboxDispatcherService(database);
+  const disabledEmail = {
+    enabled: false,
+    send: jest.fn(),
+  } as unknown as AlertEmailService;
+  const metrics = new MetricsService();
+  const dispatcher = new OutboxDispatcherService(
+    database,
+    disabledEmail,
+    metrics,
+  );
+  const competingDispatcher = new OutboxDispatcherService(
+    database,
+    disabledEmail,
+    metrics,
+  );
 
   beforeAll(async () => {
     await database.onModuleInit();
@@ -140,6 +155,7 @@ describe('Alert notification delivery', () => {
     expect(listed).toMatchObject({ unreadCount: 1 });
     expect(listed.items[0]).toMatchObject({
       title: 'BTC-USD price alert triggered',
+      emailStatus: 'DISABLED',
       readAt: null,
     });
 
@@ -153,6 +169,58 @@ describe('Alert notification delivery', () => {
     expect((await notifications.listNotifications(identity)).unreadCount).toBe(
       0,
     );
+  });
+
+  it('sends one idempotent provider email and records its delivery', async () => {
+    const email = {
+      enabled: true,
+      send: jest.fn(async () => 'email_provider_123'),
+    } as unknown as AlertEmailService;
+    const emailDispatcher = new OutboxDispatcherService(
+      database,
+      email,
+      metrics,
+    );
+    const created = await alerts.createAlert(identity, {
+      symbol: 'BTC-USD',
+      direction: 'ABOVE',
+      targetPrice: '68000',
+    });
+    await alerts.processTicker({
+      ...ticker,
+      price: '68010',
+      bid: '68009.5',
+      ask: '68010.5',
+      updatedAt: new Date().toISOString(),
+    });
+
+    await emailDispatcher.dispatchPending();
+
+    const delivery = await database.client.outboxEvent.findFirstOrThrow({
+      where: { aggregateId: created.id },
+      include: { notification: true },
+    });
+    expect(email.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'trader+notifications@example.com',
+        outboxEventId: delivery.id,
+      }),
+    );
+    expect(delivery).toMatchObject({ status: 'PUBLISHED', attempts: 1 });
+    expect(delivery.notification).toMatchObject({
+      emailStatus: 'SENT',
+      emailAttempts: 1,
+      emailProviderId: 'email_provider_123',
+    });
+    expect(
+      await database.client.auditEvent.count({
+        where: {
+          actorUserId: delivery.notification?.userId,
+          action: 'ALERT_EMAIL_DELIVERED',
+          resourceId: delivery.id,
+        },
+      }),
+    ).toBe(1);
   });
 
   it('retries invalid events with backoff before marking them failed', async () => {

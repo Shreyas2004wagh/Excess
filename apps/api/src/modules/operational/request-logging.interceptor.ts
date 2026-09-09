@@ -10,10 +10,13 @@ import type { Response } from 'express';
 import { finalize, tap } from 'rxjs';
 
 import type { AuthenticatedRequest } from '../auth/auth.types.js';
+import { MetricsService } from './metrics.service.js';
 
 @Injectable()
 export class RequestLoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
+
+  constructor(private readonly metrics: MetricsService) {}
 
   intercept(context: ExecutionContext, next: CallHandler) {
     if (context.getType() !== 'http') {
@@ -34,14 +37,17 @@ export class RequestLoggingInterceptor implements NestInterceptor {
         },
       }),
       finalize(() => {
+        const statusCode = failureStatus ?? response.statusCode;
+        const durationMs = performance.now() - startedAt;
+        this.metrics.observeHttpRequest(request.method, statusCode, durationMs);
         this.logger.log(
           JSON.stringify({
             event: 'http.request.completed',
             requestId: request.requestId,
             method: request.method,
             path: request.originalUrl,
-            statusCode: failureStatus ?? response.statusCode,
-            durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+            statusCode,
+            durationMs: Math.round(durationMs * 100) / 100,
             clerkUserId: request.identity?.clerkUserId,
           }),
         );
