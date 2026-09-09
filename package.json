@@ -13,6 +13,7 @@
     "test": "turbo run test",
     "test:e2e": "pnpm --filter @excess/web test:e2e",
     "typecheck": "turbo run typecheck",
+    "typecheck:deployment": "tsc --noEmit -p .railway/tsconfig.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:generate": "pnpm --filter @excess/database db:generate",
@@ -26,6 +27,7 @@
     "eslint-config-prettier": "^10.1.8",
     "globals": "^16.3.0",
     "prettier": "^3.6.2",
+    "railway": "^3.11.0",
     "turbo": "^2.10.12",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.42.0"
