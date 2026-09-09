@@ -92,3 +92,22 @@ jobs:
 
       - name: Test authenticated dashboard
         run: pnpm test:e2e
+
+  deployment-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment configuration
+        run: |
+          node -e "JSON.parse(require('node:fs').readFileSync('vercel.json'))"
+          pnpm typecheck:deployment
+
+      - name: Build production API image
+        run: docker build --file Dockerfile --tag excess-api:ci .
+
+      - name: Validate k6 load profile
+        run: docker run --rm -i grafana/k6:latest inspect - < ops/load/api.js

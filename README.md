@@ -63,7 +63,10 @@ One-shot price alerts can watch for a move above or below a BTC-USD target. A
 trigger is recorded atomically with an outbox delivery event so repeated or
 concurrent ticker processing cannot notify twice. The in-process outbox dispatcher
 claims those events with recoverable leases, retries failures with exponential
-backoff, and creates exactly one durable in-app notification per trigger.
+backoff, and creates exactly one durable in-app notification per trigger. Set
+`EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, and `ALERT_EMAIL_FROM` to deliver the
+same alert by email. Provider retries use `price-alert-<outbox-event-id>` as the
+Resend idempotency key, while local and test environments default to email disabled.
 
 Set `ADMIN_EMAILS` to a comma-separated list of verified Clerk email addresses to
 grant the persisted `ADMIN` role during session bootstrap. Administrators can open
@@ -76,6 +79,11 @@ quota with `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_SECONDS`. Every HTTP response
 includes a correlation ID and defensive browser headers, and every completed API
 request produces a structured log record. Liveness and readiness probes are exempt
 from rate limiting.
+
+Prometheus-compatible process, HTTP, outbox, and email metrics are available at
+`GET /api/v1/metrics`. Set `METRICS_BEARER_TOKEN` and configure the scraper to
+send it as a bearer token; the token is mandatory in production. A sample scrape
+configuration lives in `ops/prometheus/prometheus.yml.example`.
 
 The authenticated trading interface is:
 
@@ -102,6 +110,30 @@ corepack pnpm build
 corepack pnpm test:e2e
 ```
 
+Run the authenticated API load profile with a short-lived Clerk session token:
+
+```bash
+K6_AUTH_TOKEN=... corepack pnpm test:load
+```
+
+Override `K6_BASE_URL`, `K6_VUS`, `K6_RAMP_UP`, `K6_DURATION`, and
+`K6_RAMP_DOWN` for staging. The profile fails when request errors reach 1%, p95
+latency reaches 500 ms, or p99 latency reaches one second.
+
+## Deployment
+
+The NestJS API has a production container in `Dockerfile` and Railway
+Infrastructure as Code in `.railway/railway.ts`. Run `railway config plan` to
+review the API, PostgreSQL, and Redis resources, then `railway config apply` when
+the plan is correct. Add the preserved production secrets before deployment.
+Migrations run as Railway's pre-deploy command and readiness is checked before
+traffic moves.
+
+Connect the same repository to Vercel using the repository root; `vercel.json`
+builds only `@excess/web`. Configure the public Clerk values, `NEXT_PUBLIC_API_URL`,
+and `NEXT_PUBLIC_WS_URL` with the deployed API origins. Set `WEB_ORIGIN` on Railway
+to the final Vercel or custom-domain origin.
+
 ## Development order
 
 1. Foundation and local infrastructure
@@ -114,7 +146,7 @@ corepack pnpm test:e2e
 8. Persistent one-shot price alerts — complete for BTC-USD
 9. Request correlation, structured logging, rate limiting, and readiness — complete
 10. Durable in-app alert delivery and administration — complete
-11. Email delivery, external observability, deployment, and load testing
+11. Email delivery, Prometheus observability, deployment artifacts, and load testing — complete
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.

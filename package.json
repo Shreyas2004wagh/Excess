@@ -12,6 +12,7 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "test:e2e": "pnpm --filter @excess/web test:e2e",
+    "test:load": "k6 run ops/load/api.js",
     "typecheck": "turbo run typecheck",
     "typecheck:deployment": "tsc --noEmit -p .railway/tsconfig.json",
     "format": "prettier --write .",
