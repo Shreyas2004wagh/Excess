@@ -124,6 +124,12 @@ export function AdminConsole({
               {overview.deliveries.published} · Failed{' '}
               {overview.deliveries.failed}
             </p>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Email sent {overview.emailDeliveries.sent} · Pending{' '}
+              {overview.emailDeliveries.pending} · Failed{' '}
+              {overview.emailDeliveries.failed} · Disabled{' '}
+              {overview.emailDeliveries.disabled}
+            </p>
           </header>
           <div className="divide-y divide-[var(--border)]">
             {overview.recentDeliveries.length === 0 ? (
@@ -144,6 +150,17 @@ export function AdminConsole({
                     {delivery.lastError ? (
                       <p className="mt-2 max-w-xl text-sm text-rose-200">
                         {delivery.lastError}
+                      </p>
+                    ) : null}
+                    {delivery.emailStatus ? (
+                      <p className="mt-2 font-mono text-xs text-[var(--muted)]">
+                        Email {delivery.emailStatus} · {delivery.emailAttempts}{' '}
+                        attempt{delivery.emailAttempts === 1 ? '' : 's'}
+                      </p>
+                    ) : null}
+                    {delivery.emailLastError ? (
+                      <p className="mt-1 max-w-xl text-sm text-rose-200">
+                        {delivery.emailLastError}
                       </p>
                     ) : null}
                   </div>
