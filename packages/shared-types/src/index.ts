@@ -4,6 +4,7 @@ export type RiskState = 'HEALTHY' | 'MARGIN_WARNING' | 'LIQUIDATION';
 export type PriceAlertDirection = 'ABOVE' | 'BELOW';
 export type PriceAlertStatus = 'ACTIVE' | 'TRIGGERED' | 'CANCELLED';
 export type UserRole = 'TRADER' | 'ADMIN';
+export type EmailDeliveryStatus = 'DISABLED' | 'PENDING' | 'SENT' | 'FAILED';
 
 export interface HealthResponse {
   service: 'excess-api';
@@ -207,6 +208,8 @@ export interface NotificationSummary {
   title: string;
   message: string;
   metadata: Record<string, unknown> | null;
+  emailStatus: EmailDeliveryStatus;
+  emailSentAt: string | null;
   readAt: string | null;
   createdAt: string;
 }
@@ -223,6 +226,10 @@ export interface AdminDeliverySummary {
   status: 'PENDING' | 'PROCESSING' | 'PUBLISHED' | 'FAILED';
   attempts: number;
   lastError: string | null;
+  emailStatus: EmailDeliveryStatus | null;
+  emailAttempts: number;
+  emailLastError: string | null;
+  emailSentAt: string | null;
   createdAt: string;
   publishedAt: string | null;
 }
@@ -260,6 +267,12 @@ export interface AdminOverviewResponse {
     pending: number;
     processing: number;
     published: number;
+    failed: number;
+  };
+  emailDeliveries: {
+    disabled: number;
+    pending: number;
+    sent: number;
     failed: number;
   };
   recentDeliveries: AdminDeliverySummary[];

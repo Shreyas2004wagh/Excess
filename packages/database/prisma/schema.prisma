@@ -74,6 +74,13 @@ enum OutboxStatus {
   FAILED
 }
 
+enum EmailDeliveryStatus {
+  DISABLED
+  PENDING
+  SENT
+  FAILED
+}
+
 enum PriceAlertDirection {
   ABOVE
   BELOW
@@ -276,20 +283,26 @@ model OutboxEvent {
 }
 
 model Notification {
-  id            String      @id @default(uuid()) @db.Uuid
-  userId        String      @db.Uuid
-  outboxEventId String      @unique @db.Uuid
-  type          String
-  title         String
-  message       String
-  metadata      Json?
-  readAt        DateTime?
-  createdAt     DateTime    @default(now())
-  user          User        @relation(fields: [userId], references: [id])
-  outboxEvent   OutboxEvent @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
+  id                String              @id @default(uuid()) @db.Uuid
+  userId            String              @db.Uuid
+  outboxEventId     String              @unique @db.Uuid
+  type              String
+  title             String
+  message           String
+  metadata          Json?
+  readAt            DateTime?
+  emailStatus       EmailDeliveryStatus @default(DISABLED)
+  emailAttempts     Int                 @default(0)
+  emailProviderId   String?
+  emailLastError    String?
+  emailSentAt       DateTime?
+  createdAt         DateTime            @default(now())
+  user              User                @relation(fields: [userId], references: [id])
+  outboxEvent       OutboxEvent         @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt, createdAt])
   @@index([userId, createdAt])
+  @@index([emailStatus, createdAt])
 }
 
 model AuditEvent {
