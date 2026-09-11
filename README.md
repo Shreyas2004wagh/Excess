@@ -6,6 +6,9 @@ The first product milestone is a complete flow in which a user receives $10,000 
 virtual funds, watches a live BTC-USD chart, places a simulated market order, and
 sees portfolio profit and loss update in real time.
 
+The terminal now extends that flow to BTC-USD and ETH-USD while keeping one
+account-wide balance, margin model, and risk engine.
+
 ## Architecture
 
 - `apps/web` — Next.js browser application
@@ -16,7 +19,7 @@ sees portfolio profit and loss update in real time.
 - `packages/shared-types` — contracts shared by the browser and API
 
 PostgreSQL is authoritative for users, balances, orders, trades, positions, price
-alerts, and the financial ledger. Coinbase supplies public BTC-USD candles and
+alerts, and the financial ledger. Coinbase supplies public BTC-USD and ETH-USD candles and
 live ticker updates; Redis caches normalized snapshots before the NestJS WebSocket gateway
 fans them out to authenticated terminals.
 
@@ -47,8 +50,8 @@ available at `http://localhost:4000/api/v1/health`; the deployment readiness pro
 is `http://localhost:4000/api/v1/health/ready`. Readiness requires PostgreSQL,
 Redis, and a fresh live market-data ticker.
 
-After signing in, open `http://localhost:3000/terminal` for the live BTC-USD
-five-minute candlestick chart and leveraged paper-trading order ticket. Market
+After signing in, open `http://localhost:3000/terminal` for live BTC-USD and
+ETH-USD five-minute candlestick charts and a leveraged paper-trading order ticket. Market
 buys fill at the current ask and sells fill at the current bid. Limit and stop
 orders remain open until the live ticker crosses their price, and optional stop-loss/take-profit
 orders protect filled positions as an OCO pair. The terminal shows open orders,
@@ -59,7 +62,7 @@ gap loss from making the demo balance negative. Set
 `MARKET_DATA_PROVIDER=mock` for deterministic development or end-to-end tests
 without an external feed.
 
-One-shot price alerts can watch for a move above or below a BTC-USD target. A
+One-shot price alerts can watch for a move above or below a BTC-USD or ETH-USD target. A
 trigger is recorded atomically with an outbox delivery event so repeated or
 concurrent ticker processing cannot notify twice. The in-process outbox dispatcher
 claims those events with recoverable leases, retries failures with exponential
@@ -87,11 +90,14 @@ configuration lives in `ops/prometheus/prometheus.yml.example`.
 
 The authenticated trading interface is:
 
+- `GET /api/v1/market-data/instruments` — list supported instruments and quotes
+- `GET /api/v1/market-data/instruments/:symbol` — load one instrument and quote
+- `GET /api/v1/market-data/instruments/:symbol/candles` — load five-minute history
 - `POST /api/v1/trading/orders` — place an idempotent market, limit, or stop order
 - `GET /api/v1/trading/orders/open` — load accepted pending/protection orders
 - `DELETE /api/v1/trading/orders/:orderId` — cancel an accepted order
 - `GET /api/v1/trading/portfolio` — load balance, equity, and open positions
-- `POST /api/v1/alerts` — create a one-shot BTC-USD price alert
+- `POST /api/v1/alerts` — create a one-shot price alert for a supported instrument
 - `GET /api/v1/alerts` — list active, triggered, and cancelled alerts
 - `DELETE /api/v1/alerts/:alertId` — cancel an active alert
 - `GET /api/v1/notifications` — list recent in-app notifications and unread count
@@ -147,6 +153,7 @@ to the final Vercel or custom-domain origin.
 9. Request correlation, structured logging, rate limiting, and readiness — complete
 10. Durable in-app alert delivery and administration — complete
 11. Email delivery, Prometheus observability, deployment artifacts, and load testing — complete
+12. Multi-instrument market data, trading, portfolio risk, and alerts — complete for BTC-USD and ETH-USD
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.
