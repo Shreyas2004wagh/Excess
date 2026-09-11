@@ -102,7 +102,7 @@ export default async function DashboardPage() {
                 Market data
               </p>
               <h2 className="mt-5 text-2xl font-semibold">
-                BTC-USD terminal is live.
+                BTC and ETH markets are live.
               </h2>
               <p className="mt-3 leading-7 text-[var(--muted)]">
                 Follow Coinbase prices and five-minute candles, place simulated

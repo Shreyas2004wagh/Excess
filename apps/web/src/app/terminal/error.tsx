@@ -10,7 +10,7 @@ export default function TerminalError({ reset }: { reset: () => void }) {
           Market feed interrupted
         </p>
         <h1 className="mt-4 text-3xl font-semibold">
-          The BTC-USD terminal could not load.
+          The trading terminal could not load.
         </h1>
         <p className="mt-3 leading-7 text-[var(--muted)]">
           Your account is unaffected. Retry the feed or return to your account

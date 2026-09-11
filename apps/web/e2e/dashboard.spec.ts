@@ -26,7 +26,7 @@ test('provisions one demo account and keeps it after refresh', async ({
 
   await expect(page.getByText('$10,000.00', { exact: true })).toBeVisible();
   await expect(page.getByText('Opening demo credit')).toHaveCount(1);
-  await expect(page.getByText('BTC-USD terminal is live.')).toBeVisible();
+  await expect(page.getByText('BTC and ETH markets are live.')).toBeVisible();
 
   await page.reload();
   await expect(page.getByText('$10,000.00', { exact: true })).toBeVisible();
@@ -37,7 +37,9 @@ test('provisions one demo account and keeps it after refresh', async ({
   await expect(page).toHaveURL(/\/sign-in/);
 });
 
-test('renders the authenticated live BTC-USD terminal', async ({ page }) => {
+test('renders and switches the authenticated multi-market terminal', async ({
+  page,
+}) => {
   const email = process.env.E2E_CLERK_USER_EMAIL;
   if (!email) {
     throw new Error('E2E_CLERK_USER_EMAIL is required');
@@ -60,6 +62,16 @@ test('renders the authenticated live BTC-USD terminal', async ({ page }) => {
   await expect
     .poll(() => livePrice.textContent(), { timeout: 5_000 })
     .not.toBe(initialPrice);
+
+  await page.getByTestId('instrument-ETH-USD').click();
+  await expect(
+    page.getByRole('heading', { name: 'ETH / USD', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Quantity (ETH)')).toHaveValue('0.1');
+  await expect(
+    page.getByRole('button', { name: 'Buy ETH · market' }),
+  ).toBeVisible();
+  await page.getByTestId('instrument-BTC-USD').click();
 
   await page.getByLabel('Quantity (BTC)').fill('0.01');
   await page.getByRole('button', { name: '2×', exact: true }).click();

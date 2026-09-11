@@ -7,6 +7,7 @@ import type {
   MarketCandle,
   MarketDataStatus,
   MarketInstrumentSummary,
+  MarketSymbol,
   MarketTicker,
   OrderPlacementRequest,
   OrderPlacementResponse,
@@ -78,7 +79,7 @@ function suggestedPrice(
   ticker: MarketTicker,
 ) {
   const executable = Number(side === 'BUY' ? ticker.ask : ticker.bid);
-  const offset = type === 'LIMIT' ? -100 : 100;
+  const offset = executable * (type === 'LIMIT' ? -0.005 : 0.005);
   const direction = side === 'BUY' ? 1 : -1;
   return (executable + offset * direction).toFixed(2);
 }
@@ -87,16 +88,18 @@ function suggestedAlertPrice(
   direction: PriceAlertDirection,
   ticker: MarketTicker,
 ) {
-  const offset = direction === 'ABOVE' ? 500 : -500;
-  return (Number(ticker.price) + offset).toFixed(2);
+  const multiplier = direction === 'ABOVE' ? 1.01 : 0.99;
+  return (Number(ticker.price) * multiplier).toFixed(2);
 }
 
-function portfolioAtMark(
+function portfolioAtMarket(
   portfolio: PortfolioSummary,
-  markPrice: string,
+  tickers: Readonly<Record<MarketSymbol, MarketTicker>>,
 ): PortfolioSummary {
-  const mark = Number(markPrice);
   const positions = portfolio.positions.map((position) => {
+    const markPrice =
+      tickers[position.symbol as MarketSymbol]?.price ?? position.markPrice;
+    const mark = Number(markPrice);
     const quantity = Number(position.signedQuantity);
     const entry = Number(position.averageEntryPrice ?? markPrice);
     return {
@@ -137,15 +140,15 @@ function portfolioAtMark(
 }
 
 export function MarketTerminal({
-  candles,
-  instrument,
+  candlesBySymbol,
+  instruments,
   openOrders: initialOpenOrders,
   portfolio: initialPortfolio,
   priceAlerts: initialPriceAlerts,
   user,
 }: {
-  candles: CandleHistoryResponse;
-  instrument: MarketInstrumentSummary;
+  candlesBySymbol: Record<MarketSymbol, CandleHistoryResponse>;
+  instruments: MarketInstrumentSummary[];
   openOrders: OrderSummary[];
   portfolio: PortfolioSummary;
   priceAlerts: PriceAlertSummary[];
@@ -156,10 +159,19 @@ export function MarketTerminal({
   const chart = useRef<IChartApi | null>(null);
   const candleSeries = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const pendingCandle = useRef<MarketCandle | null>(null);
-  const [ticker, setTicker] = useState<MarketTicker>(instrument.ticker);
-  const [feedStatus, setFeedStatus] = useState<MarketDataStatus>(
-    instrument.ticker.status,
+  const [selectedSymbol, setSelectedSymbol] = useState<MarketSymbol>('BTC-USD');
+  const [tickers, setTickers] = useState<Record<MarketSymbol, MarketTicker>>(
+    () =>
+      Object.fromEntries(
+        instruments.map((item) => [item.symbol, item.ticker]),
+      ) as Record<MarketSymbol, MarketTicker>,
   );
+  const instrument =
+    instruments.find((item) => item.symbol === selectedSymbol) ??
+    instruments[0]!;
+  const candles = candlesBySymbol[instrument.symbol];
+  const ticker = tickers[instrument.symbol] ?? instrument.ticker;
+  const [feedStatus, setFeedStatus] = useState<MarketDataStatus>(ticker.status);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [portfolio, setPortfolio] =
     useState<PortfolioSummary>(initialPortfolio);
@@ -167,7 +179,9 @@ export function MarketTerminal({
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [quantity, setQuantity] = useState('0.01');
   const [leverage, setLeverage] = useState<Leverage>(
-    initialPortfolio.positions[0]?.leverage ?? 1,
+    initialPortfolio.positions.find(
+      (position) => position.symbol === selectedSymbol,
+    )?.leverage ?? 1,
   );
   const [orderPrice, setOrderPrice] = useState(instrument.ticker.price);
   const [stopLossPrice, setStopLossPrice] = useState('');
@@ -276,8 +290,13 @@ export function MarketTerminal({
         setStreamError('Reconnecting to the market stream…');
       });
       socket.on('market:ticker', (nextTicker: MarketTicker) => {
-        setTicker(nextTicker);
-        setFeedStatus(nextTicker.status);
+        setTickers((current) => ({
+          ...current,
+          [nextTicker.symbol]: nextTicker,
+        }));
+        if (nextTicker.symbol === instrument.symbol) {
+          setFeedStatus(nextTicker.status);
+        }
       });
       socket.on(
         'market:candle',
@@ -336,8 +355,10 @@ export function MarketTerminal({
 
   const change = Number(ticker.change24h);
   const positive = change >= 0;
-  const livePortfolio = portfolioAtMark(portfolio, ticker.price);
-  const openPosition = livePortfolio.positions[0];
+  const livePortfolio = portfolioAtMarket(portfolio, tickers);
+  const openPosition = livePortfolio.positions.find(
+    (position) => position.symbol === instrument.symbol,
+  );
   const estimatedPrice =
     orderType === 'MARKET'
       ? side === 'BUY'
@@ -353,9 +374,38 @@ export function MarketTerminal({
       (Number.isFinite(parsedOrderPrice) && parsedOrderPrice > 0));
   const estimatedMargin =
     ((parsedQuantity || 0) * Number(estimatedPrice)) / leverage;
-  const visibleAlerts = priceAlerts.filter(
-    (alert) => alert.status !== 'CANCELLED',
+  const visibleOpenOrders = openOrders.filter(
+    (order) => order.symbol === instrument.symbol,
   );
+  const visibleAlerts = priceAlerts.filter(
+    (alert) =>
+      alert.symbol === instrument.symbol && alert.status !== 'CANCELLED',
+  );
+
+  function selectInstrument(symbol: MarketSymbol) {
+    const nextInstrument = instruments.find((item) => item.symbol === symbol);
+    if (!nextInstrument || symbol === instrument.symbol) return;
+    const nextTicker = tickers[symbol] ?? nextInstrument.ticker;
+    const nextPosition = portfolio.positions.find(
+      (position) => position.symbol === symbol,
+    );
+    setSelectedSymbol(symbol);
+    setFeedStatus(nextTicker.status);
+    setQuantity(symbol === 'BTC-USD' ? '0.01' : '0.1');
+    setLeverage(nextPosition?.leverage ?? 1);
+    setOrderPrice(
+      orderType === 'MARKET'
+        ? nextTicker.price
+        : suggestedPrice(orderType, side, nextTicker),
+    );
+    setAlertPrice(suggestedAlertPrice(alertDirection, nextTicker));
+    setStopLossPrice('');
+    setTakeProfitPrice('');
+    setOrderError(null);
+    setAlertError(null);
+    setLastOrder(null);
+    pendingCandle.current = null;
+  }
 
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -374,7 +424,7 @@ export function MarketTerminal({
       };
       const base = {
         clientOrderId: crypto.randomUUID(),
-        symbol: 'BTC-USD',
+        symbol: instrument.symbol,
         side,
         quantity,
         leverage,
@@ -451,7 +501,7 @@ export function MarketTerminal({
       const token = await getToken();
       if (!token) throw new Error('Your session expired. Sign in again.');
       const alert = await createPriceAlert(token, {
-        symbol: 'BTC-USD',
+        symbol: instrument.symbol,
         direction: alertDirection,
         targetPrice: alertPrice,
       });
@@ -556,28 +606,47 @@ export function MarketTerminal({
           <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
             Watchlist
           </p>
-          <button
-            className="mt-4 w-full rounded-xl border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-4 text-left"
-            type="button"
-          >
-            <span className="flex items-start justify-between gap-2">
-              <span>
-                <span className="block font-semibold">BTC / USD</span>
-                <span className="mt-1 block text-xs text-[var(--muted)]">
-                  Bitcoin · Demo CFD
-                </span>
-              </span>
-              <span
-                className={`font-mono text-xs ${positive ? 'text-[var(--accent)]' : 'text-rose-300'}`}
-              >
-                {positive ? '+' : ''}
-                {decimal(ticker.change24h)}%
-              </span>
-            </span>
-            <span className="mt-5 block font-mono text-lg">
-              ${decimal(ticker.price)}
-            </span>
-          </button>
+          <div className="mt-4 space-y-2">
+            {instruments.map((item) => {
+              const itemTicker = tickers[item.symbol] ?? item.ticker;
+              const itemPositive = Number(itemTicker.change24h) >= 0;
+              const selected = item.symbol === instrument.symbol;
+              return (
+                <button
+                  aria-pressed={selected}
+                  className={`w-full rounded-xl border p-4 text-left transition ${
+                    selected
+                      ? 'border-[var(--accent)]/30 bg-[var(--accent)]/5'
+                      : 'border-transparent bg-[#0b0f14] hover:border-[var(--border)]'
+                  }`}
+                  data-testid={`instrument-${item.symbol}`}
+                  key={item.symbol}
+                  onClick={() => selectInstrument(item.symbol)}
+                  type="button"
+                >
+                  <span className="flex items-start justify-between gap-2">
+                    <span>
+                      <span className="block font-semibold">
+                        {item.displayName.replace('/', ' / ')}
+                      </span>
+                      <span className="mt-1 block text-xs text-[var(--muted)]">
+                        {item.baseCurrency} · Demo CFD
+                      </span>
+                    </span>
+                    <span
+                      className={`font-mono text-xs ${itemPositive ? 'text-[var(--accent)]' : 'text-rose-300'}`}
+                    >
+                      {itemPositive ? '+' : ''}
+                      {decimal(itemTicker.change24h)}%
+                    </span>
+                  </span>
+                  <span className="mt-5 block font-mono text-lg">
+                    ${decimal(itemTicker.price)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
           <div className="mt-6 space-y-3 border-t border-[var(--border)] pt-5 text-xs">
             <div className="flex justify-between">
               <span className="text-[var(--muted)]">Tick size</span>
@@ -594,7 +663,9 @@ export function MarketTerminal({
           <header className="flex flex-wrap items-end justify-between gap-4 border-b border-[var(--border)] px-5 py-4">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-lg font-semibold">BTC / USD</h1>
+                <h1 className="text-lg font-semibold">
+                  {instrument.displayName.replace('/', ' / ')}
+                </h1>
                 <span className="rounded-full border border-[var(--border)] px-2 py-0.5 font-mono text-[10px] text-[var(--muted)]">
                   CFD
                 </span>
@@ -648,7 +719,7 @@ export function MarketTerminal({
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] px-5 py-3 text-[11px] text-[var(--muted)]">
             <span>
               {candles.items.length} five-minute candles · Volume{' '}
-              {decimal(ticker.volume24h, 4)} BTC
+              {decimal(ticker.volume24h, 4)} {instrument.baseCurrency}
             </span>
             <a
               className="transition hover:text-[var(--foreground)]"
@@ -711,7 +782,7 @@ export function MarketTerminal({
               </div>
             </fieldset>
             <label className="mt-4 block text-xs text-[var(--muted)]">
-              Quantity (BTC)
+              Quantity ({instrument.baseCurrency})
               <input
                 className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
                 inputMode="decimal"
@@ -839,7 +910,7 @@ export function MarketTerminal({
                 ? orderType === 'MARKET'
                   ? 'Executing…'
                   : 'Submitting…'
-                : `${side === 'BUY' ? 'Buy' : 'Sell'} BTC · ${orderType.toLowerCase()}`}
+                : `${side === 'BUY' ? 'Buy' : 'Sell'} ${instrument.baseCurrency} · ${orderType.toLowerCase()}`}
             </button>
           </form>
           {orderError ? (
@@ -857,8 +928,8 @@ export function MarketTerminal({
             >
               {lastOrder.trade ? (
                 <>
-                  Filled {lastOrder.trade.quantity} BTC at $
-                  {decimal(lastOrder.trade.price)}
+                  Filled {lastOrder.trade.quantity} {instrument.baseCurrency} at
+                  ${decimal(lastOrder.trade.price)}
                   {lastOrder.relatedOrders.length > 0
                     ? ` · ${lastOrder.relatedOrders.length} protection order${lastOrder.relatedOrders.length === 1 ? '' : 's'} active`
                     : ''}
@@ -1000,7 +1071,7 @@ export function MarketTerminal({
                   String(Math.abs(Number(openPosition.signedQuantity))),
                   8,
                 )}{' '}
-                BTC
+                {instrument.baseCurrency}
               </p>
             </div>
             <div>
@@ -1024,8 +1095,8 @@ export function MarketTerminal({
           </div>
         ) : (
           <p className="mt-4 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
-            No open BTC-USD position. Place a market order to start tracking
-            live P/L.
+            No open {instrument.symbol} position. Place a market order to start
+            tracking live P/L.
           </p>
         )}
       </section>
@@ -1039,12 +1110,12 @@ export function MarketTerminal({
             <h2 className="mt-2 text-lg font-semibold">Open orders</h2>
           </div>
           <span className="rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[10px] text-[var(--muted)]">
-            {openOrders.length} active
+            {visibleOpenOrders.length} active
           </span>
         </div>
-        {openOrders.length > 0 ? (
+        {visibleOpenOrders.length > 0 ? (
           <div className="mt-5 space-y-2" data-testid="open-orders">
-            {openOrders.map((order) => {
+            {visibleOpenOrders.map((order) => {
               const label = orderLabel(order);
               const triggerPrice =
                 order.requestedPrice ?? order.stopPrice ?? '0';
@@ -1067,7 +1138,9 @@ export function MarketTerminal({
                   </p>
                   <div>
                     <p className="text-xs text-[var(--muted)]">Quantity</p>
-                    <p className="mt-1 font-mono">{order.quantity} BTC</p>
+                    <p className="mt-1 font-mono">
+                      {order.quantity} {instrument.baseCurrency}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs text-[var(--muted)]">
@@ -1104,7 +1177,8 @@ export function MarketTerminal({
             </p>
             <h2 className="mt-2 text-lg font-semibold">Price alerts</h2>
             <p className="mt-2 max-w-xl text-sm text-[var(--muted)]">
-              Trigger once when the live BTC-USD price crosses your target.
+              Trigger once when the live {instrument.symbol} price crosses your
+              target.
             </p>
           </div>
           <form
@@ -1171,7 +1245,7 @@ export function MarketTerminal({
               >
                 <div>
                   <p className="font-semibold">
-                    BTC-USD {alert.direction.toLowerCase()} $
+                    {alert.symbol} {alert.direction.toLowerCase()} $
                     {decimal(alert.targetPrice)}
                   </p>
                   <p className="mt-1 text-xs text-[var(--muted)]">

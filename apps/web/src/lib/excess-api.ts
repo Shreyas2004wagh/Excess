@@ -7,6 +7,8 @@ import type {
   MarketOrderRequest,
   MarketOrderResponse,
   MarketInstrumentSummary,
+  MarketInstrumentsResponse,
+  MarketSymbol,
   NotificationSummary,
   NotificationsResponse,
   OpenOrdersResponse,
@@ -79,14 +81,24 @@ export function getLedger(token: string) {
   return request<LedgerPage>('/accounts/demo/ledger?limit=20', token);
 }
 
-export function getMarketInstrument(token: string, symbol = 'BTC-USD') {
+export function getMarketInstruments(token: string) {
+  return request<MarketInstrumentsResponse>('/market-data/instruments', token);
+}
+
+export function getMarketInstrument(
+  token: string,
+  symbol: MarketSymbol = 'BTC-USD',
+) {
   return request<MarketInstrumentSummary>(
     `/market-data/instruments/${symbol}`,
     token,
   );
 }
 
-export function getMarketCandles(token: string, symbol = 'BTC-USD') {
+export function getMarketCandles(
+  token: string,
+  symbol: MarketSymbol = 'BTC-USD',
+) {
   return request<CandleHistoryResponse>(
     `/market-data/instruments/${symbol}/candles?granularity=300&limit=300`,
     token,

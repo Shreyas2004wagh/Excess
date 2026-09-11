@@ -1,11 +1,12 @@
 import { auth } from '@clerk/nextjs/server';
+import type { CandleHistoryResponse, MarketSymbol } from '@excess/shared-types';
 import { redirect } from 'next/navigation';
 
 import {
   bootstrapSession,
   ExcessApiError,
   getMarketCandles,
-  getMarketInstrument,
+  getMarketInstruments,
   getOpenOrders,
   getPortfolio,
   getPriceAlerts,
@@ -25,19 +26,26 @@ export default async function TerminalPage() {
 
   try {
     const bootstrap = await bootstrapSession(token);
-    const [instrument, candles, portfolio, openOrders, priceAlerts] =
+    const [instrumentCatalog, portfolio, openOrders, priceAlerts] =
       await Promise.all([
-        getMarketInstrument(token),
-        getMarketCandles(token),
+        getMarketInstruments(token),
         getPortfolio(token),
         getOpenOrders(token),
         getPriceAlerts(token),
       ]);
+    const candleHistories = await Promise.all(
+      instrumentCatalog.items.map((instrument) =>
+        getMarketCandles(token, instrument.symbol),
+      ),
+    );
+    const candlesBySymbol = Object.fromEntries(
+      candleHistories.map((history) => [history.symbol, history]),
+    ) as Record<MarketSymbol, CandleHistoryResponse>;
 
     return (
       <MarketTerminal
-        candles={candles}
-        instrument={instrument}
+        candlesBySymbol={candlesBySymbol}
+        instruments={instrumentCatalog.items}
         openOrders={openOrders.items}
         portfolio={portfolio}
         priceAlerts={priceAlerts.items}
