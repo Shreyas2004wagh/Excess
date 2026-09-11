@@ -45,7 +45,7 @@ describe('parseCoinbaseMessage', () => {
     ]);
   });
 
-  it('normalizes BTC-USD candle updates and ignores unsupported input', () => {
+  it('normalizes supported candle updates and ignores unsupported input', () => {
     expect(
       parseCoinbaseMessage(
         JSON.stringify({
@@ -61,6 +61,24 @@ describe('parseCoinbaseMessage', () => {
                   low: '64950',
                   close: '65075',
                   volume: '12.5',
+                },
+                {
+                  product_id: 'ETH-USD',
+                  start: '1788264000',
+                  open: '3500',
+                  high: '3520',
+                  low: '3490',
+                  close: '3515',
+                  volume: '120.5',
+                },
+                {
+                  product_id: 'SOL-USD',
+                  start: '1788264000',
+                  open: '100',
+                  high: '101',
+                  low: '99',
+                  close: '100.5',
+                  volume: '200',
                 },
               ],
             },
@@ -78,6 +96,18 @@ describe('parseCoinbaseMessage', () => {
           low: '64950',
           close: '65075',
           volume: '12.5',
+        },
+      },
+      {
+        type: 'candle',
+        symbol: 'ETH-USD',
+        candle: {
+          time: 1788264000,
+          open: '3500',
+          high: '3520',
+          low: '3490',
+          close: '3515',
+          volume: '120.5',
         },
       },
     ]);

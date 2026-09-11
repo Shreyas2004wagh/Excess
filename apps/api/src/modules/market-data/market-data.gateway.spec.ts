@@ -25,7 +25,7 @@ const config = {
 
 const marketData = {
   subscribe: () => () => undefined,
-  getCurrentTicker: () => null,
+  getCurrentTickers: () => [],
 } as unknown as MarketDataService;
 
 describe('MarketDataGateway', () => {
@@ -46,7 +46,7 @@ describe('MarketDataGateway', () => {
     expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
 
-  it('joins the BTC-USD stream with a verified Clerk session', async () => {
+  it('joins every supported stream with a verified Clerk session', async () => {
     const clerk = {
       authenticate: jest.fn(async () => ({
         isAuthenticated: true,
@@ -59,6 +59,7 @@ describe('MarketDataGateway', () => {
     await gateway.handleConnection(socket);
 
     expect(socket.join).toHaveBeenCalledWith('BTC-USD');
+    expect(socket.join).toHaveBeenCalledWith('ETH-USD');
     expect(socket.disconnect).not.toHaveBeenCalled();
     expect(socket.data).toMatchObject({
       identity: {

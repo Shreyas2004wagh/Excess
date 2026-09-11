@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import type {
   MarketCandle,
   MarketDataStatus,
+  MarketSymbol,
   MarketStreamEvent,
 } from '@excess/shared-types';
 
@@ -34,23 +35,28 @@ class FakeProvider implements MarketDataProvider {
   start = jest.fn(async () => undefined);
   stop = jest.fn(async () => undefined);
 
-  async fetchCandles(limit: number): Promise<MarketCandle[]> {
+  async fetchCandles(
+    symbol: MarketSymbol,
+    limit: number,
+  ): Promise<MarketCandle[]> {
+    const basePrice = symbol === 'BTC-USD' ? 65_000 : 3_500;
     return Array.from({ length: limit }, (_, index) => ({
       time: 1_788_000_000 + index * 300,
-      open: `${65_000 + index}`,
-      high: `${65_010 + index}`,
-      low: `${64_990 + index}`,
-      close: `${65_005 + index}`,
+      open: `${basePrice + index}`,
+      high: `${basePrice + 10 + index}`,
+      low: `${basePrice - 10 + index}`,
+      close: `${basePrice + 5 + index}`,
       volume: '10.25',
     }));
   }
 
-  async fetchTicker(): Promise<ProviderTicker> {
+  async fetchTicker(symbol: MarketSymbol): Promise<ProviderTicker> {
+    const price = symbol === 'BTC-USD' ? '65005' : '3505';
     return {
-      symbol: 'BTC-USD',
-      price: '65005',
-      bid: '65004.99',
-      ask: '65005.01',
+      symbol,
+      price,
+      bid: `${Number(price) - 0.01}`,
+      ask: `${Number(price) + 0.01}`,
       change24h: '1.5',
       high24h: '66000',
       low24h: '64000',
@@ -88,9 +94,15 @@ describe('MarketDataService', () => {
     await database.onModuleDestroy();
   });
 
-  it('provisions BTC-USD and returns normalized history and instrument data', async () => {
-    const instrument = await service.getInstrument('BTC-USD');
-    const history = await service.getCandles('BTC-USD', 100);
+  it('provisions the BTC and ETH catalog with isolated histories', async () => {
+    const [instrument, ethInstrument, history, ethHistory, catalog] =
+      await Promise.all([
+        service.getInstrument('BTC-USD'),
+        service.getInstrument('ETH-USD'),
+        service.getCandles('BTC-USD', 100),
+        service.getCandles('ETH-USD', 50),
+        service.listInstruments(),
+      ]);
 
     expect(instrument).toMatchObject({
       symbol: 'BTC-USD',
@@ -99,6 +111,17 @@ describe('MarketDataService', () => {
       ticker: { price: '65005', source: 'SIMULATED' },
     });
     expect(history.items).toHaveLength(100);
+    expect(ethInstrument).toMatchObject({
+      symbol: 'ETH-USD',
+      displayName: 'ETH/USD',
+      ticker: { price: '3505', source: 'SIMULATED' },
+    });
+    expect(ethHistory).toMatchObject({ symbol: 'ETH-USD' });
+    expect(ethHistory.items).toHaveLength(50);
+    expect(catalog.items.map((item) => item.symbol)).toEqual([
+      'BTC-USD',
+      'ETH-USD',
+    ]);
     expect(history.granularity).toBe(300);
     expect(history.items[0]?.time).toBeLessThan(
       history.items.at(-1)?.time ?? 0,
@@ -121,7 +144,7 @@ describe('MarketDataService', () => {
     provider.emit({
       type: 'ticker',
       ticker: {
-        ...(await provider.fetchTicker()),
+        ...(await provider.fetchTicker('BTC-USD')),
         price: '65180',
       },
     });
@@ -138,7 +161,7 @@ describe('MarketDataService', () => {
   });
 
   it('rejects unsupported instruments', async () => {
-    await expect(service.getInstrument('ETH-USD')).rejects.toMatchObject({
+    await expect(service.getInstrument('SOL-USD')).rejects.toMatchObject({
       status: 404,
     });
   });

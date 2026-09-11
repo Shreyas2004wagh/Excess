@@ -1,12 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { MarketCandle, MarketDataStatus } from '@excess/shared-types';
+import type {
+  MarketCandle,
+  MarketDataStatus,
+  MarketSymbol,
+} from '@excess/shared-types';
 import WebSocket from 'ws';
 import { z } from 'zod';
 
 import {
   CANDLE_GRANULARITY,
-  MARKET_SYMBOL,
+  MARKET_SYMBOLS,
+  isMarketSymbol,
   type MarketDataProvider,
   type MarketProviderEvent,
   type ProviderTicker,
@@ -96,42 +101,48 @@ export function parseCoinbaseMessage(raw: string): MarketProviderEvent[] {
   const tickerMessage = tickerMessageSchema.safeParse(value);
   if (tickerMessage.success) {
     return tickerMessage.data.events.flatMap((event) =>
-      event.tickers
-        .filter((ticker) => ticker.product_id === MARKET_SYMBOL)
-        .map((ticker) => ({
-          type: 'ticker' as const,
-          ticker: {
-            symbol: ticker.product_id,
-            price: ticker.price,
-            bid: ticker.best_bid,
-            ask: ticker.best_ask,
-            change24h: ticker.price_percent_chg_24_h ?? '0',
-            high24h: ticker.high_24_h ?? ticker.price,
-            low24h: ticker.low_24_h ?? ticker.price,
-            volume24h: ticker.volume_24_h ?? '0',
-            updatedAt: new Date(tickerMessage.data.timestamp).toISOString(),
+      event.tickers.flatMap((ticker) => {
+        if (!isMarketSymbol(ticker.product_id)) return [];
+        return [
+          {
+            type: 'ticker' as const,
+            ticker: {
+              symbol: ticker.product_id,
+              price: ticker.price,
+              bid: ticker.best_bid,
+              ask: ticker.best_ask,
+              change24h: ticker.price_percent_chg_24_h ?? '0',
+              high24h: ticker.high_24_h ?? ticker.price,
+              low24h: ticker.low_24_h ?? ticker.price,
+              volume24h: ticker.volume_24_h ?? '0',
+              updatedAt: new Date(tickerMessage.data.timestamp).toISOString(),
+            },
           },
-        })),
+        ];
+      }),
     );
   }
 
   const candleMessage = candleMessageSchema.safeParse(value);
   if (candleMessage.success) {
     return candleMessage.data.events.flatMap((event) =>
-      event.candles
-        .filter((candle) => candle.product_id === MARKET_SYMBOL)
-        .map((candle) => ({
-          type: 'candle' as const,
-          symbol: candle.product_id,
-          candle: {
-            time: Number(candle.start),
-            open: candle.open,
-            high: candle.high,
-            low: candle.low,
-            close: candle.close,
-            volume: candle.volume,
+      event.candles.flatMap((candle) => {
+        if (!isMarketSymbol(candle.product_id)) return [];
+        return [
+          {
+            type: 'candle' as const,
+            symbol: candle.product_id,
+            candle: {
+              time: Number(candle.start),
+              open: candle.open,
+              high: candle.high,
+              low: candle.low,
+              close: candle.close,
+              volume: candle.volume,
+            },
           },
-        })),
+        ];
+      }),
     );
   }
 
@@ -199,8 +210,11 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
     this.emit({ type: 'status', status: 'OFFLINE' });
   }
 
-  async fetchCandles(limit: number): Promise<MarketCandle[]> {
-    const url = new URL(`/products/${MARKET_SYMBOL}/candles`, this.restUrl);
+  async fetchCandles(
+    symbol: MarketSymbol,
+    limit: number,
+  ): Promise<MarketCandle[]> {
+    const url = new URL(`/products/${symbol}/candles`, this.restUrl);
     url.searchParams.set('granularity', CANDLE_GRANULARITY.toString());
 
     const response = await fetch(url, {
@@ -225,7 +239,7 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
       .slice(-limit);
   }
 
-  async fetchTicker(): Promise<ProviderTicker> {
+  async fetchTicker(symbol: MarketSymbol): Promise<ProviderTicker> {
     const headers = { Accept: 'application/json', 'User-Agent': 'Excess/0.2' };
     const request = (path: string) =>
       fetch(new URL(path, this.restUrl), {
@@ -233,8 +247,8 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
         signal: AbortSignal.timeout(5_000),
       });
     const [tickerResponse, statsResponse] = await Promise.all([
-      request(`/products/${MARKET_SYMBOL}/ticker`),
-      request(`/products/${MARKET_SYMBOL}/stats`),
+      request(`/products/${symbol}/ticker`),
+      request(`/products/${symbol}/stats`),
     ]);
     if (!tickerResponse.ok || !statsResponse.ok) {
       throw new Error('Coinbase ticker request failed');
@@ -243,7 +257,7 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
     const ticker = tickerResponseSchema.parse(await tickerResponse.json());
     const stats = statsResponseSchema.parse(await statsResponse.json());
     return {
-      symbol: MARKET_SYMBOL,
+      symbol,
       price: ticker.price,
       bid: ticker.bid,
       ask: ticker.ask,
@@ -269,14 +283,14 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
       socket.send(
         JSON.stringify({
           type: 'subscribe',
-          product_ids: [MARKET_SYMBOL],
+          product_ids: MARKET_SYMBOLS,
           channel: 'ticker',
         }),
       );
       socket.send(
         JSON.stringify({
           type: 'subscribe',
-          product_ids: [MARKET_SYMBOL],
+          product_ids: MARKET_SYMBOLS,
           channel: 'candles',
         }),
       );

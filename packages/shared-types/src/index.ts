@@ -1,4 +1,6 @@
 export type DecimalString = string;
+export const MARKET_SYMBOLS = ['BTC-USD', 'ETH-USD'] as const;
+export type MarketSymbol = (typeof MARKET_SYMBOLS)[number];
 export type Leverage = 1 | 2 | 5 | 10;
 export type RiskState = 'HEALTHY' | 'MARGIN_WARNING' | 'LIQUIDATION';
 export type PriceAlertDirection = 'ABOVE' | 'BELOW';
@@ -79,7 +81,7 @@ export interface LedgerPage {
 
 interface OrderRequestBase {
   clientOrderId: string;
-  symbol: 'BTC-USD';
+  symbol: MarketSymbol;
   side: OrderSide;
   quantity: DecimalString;
   leverage?: Leverage;
@@ -180,7 +182,7 @@ export interface OpenOrdersResponse {
 }
 
 export interface CreatePriceAlertRequest {
-  symbol: 'BTC-USD';
+  symbol: MarketSymbol;
   direction: PriceAlertDirection;
   targetPrice: DecimalString;
 }
@@ -294,7 +296,7 @@ export interface MarketCandle {
 }
 
 export interface MarketTicker {
-  symbol: string;
+  symbol: MarketSymbol;
   price: DecimalString;
   bid: DecimalString;
   ask: DecimalString;
@@ -308,7 +310,7 @@ export interface MarketTicker {
 }
 
 export interface MarketInstrumentSummary {
-  symbol: string;
+  symbol: MarketSymbol;
   displayName: string;
   baseCurrency: string;
   quoteCurrency: string;
@@ -321,8 +323,12 @@ export interface MarketInstrumentSummary {
   ticker: MarketTicker;
 }
 
+export interface MarketInstrumentsResponse {
+  items: MarketInstrumentSummary[];
+}
+
 export interface CandleHistoryResponse {
-  symbol: string;
+  symbol: MarketSymbol;
   granularity: 300;
   items: MarketCandle[];
   source: MarketDataSource;
@@ -333,9 +339,9 @@ export type MarketStreamEvent =
   | { event: 'market:ticker'; data: MarketTicker }
   | {
       event: 'market:candle';
-      data: { symbol: string; candle: MarketCandle };
+      data: { symbol: MarketSymbol; candle: MarketCandle };
     }
   | {
       event: 'market:status';
-      data: { symbol: string; status: MarketDataStatus };
+      data: { symbol: MarketSymbol; status: MarketDataStatus };
     };

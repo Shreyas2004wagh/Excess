@@ -12,7 +12,7 @@ import type { Namespace, Socket } from 'socket.io';
 import { CLERK_GATEWAY } from '../auth/auth.tokens.js';
 import type { ClerkGateway } from '../auth/auth.types.js';
 import { MarketDataService } from './market-data.service.js';
-import { MARKET_SYMBOL } from './market-data.types.js';
+import { MARKET_SYMBOLS } from './market-data.types.js';
 
 @WebSocketGateway({
   namespace: '/market-data',
@@ -38,7 +38,7 @@ export class MarketDataGateway
 
   afterInit() {
     this.unsubscribe = this.marketData.subscribe((message) => {
-      this.server.to(MARKET_SYMBOL).emit(message.event, message.data);
+      this.server.to(message.data.symbol).emit(message.event, message.data);
     });
   }
 
@@ -68,9 +68,8 @@ export class MarketDataGateway
         clerkUserId: auth.userId,
         sessionId: auth.sessionId,
       };
-      await client.join(MARKET_SYMBOL);
-      const ticker = this.marketData.getCurrentTicker();
-      if (ticker) {
+      await Promise.all(MARKET_SYMBOLS.map((symbol) => client.join(symbol)));
+      for (const ticker of this.marketData.getCurrentTickers()) {
         client.emit('market:ticker', ticker);
       }
     } catch {
@@ -85,7 +84,7 @@ export class MarketDataGateway
   private reject(client: Socket) {
     const message: Extract<MarketStreamEvent, { event: 'market:status' }> = {
       event: 'market:status',
-      data: { symbol: MARKET_SYMBOL, status: 'OFFLINE' },
+      data: { symbol: 'BTC-USD', status: 'OFFLINE' },
     };
     client.emit('market:error', {
       code: 'UNAUTHORIZED',

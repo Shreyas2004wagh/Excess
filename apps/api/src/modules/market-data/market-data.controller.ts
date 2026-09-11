@@ -8,6 +8,7 @@ import {
 import type {
   CandleHistoryResponse,
   MarketInstrumentSummary,
+  MarketInstrumentsResponse,
 } from '@excess/shared-types';
 import { z } from 'zod';
 
@@ -21,6 +22,11 @@ const candleQuerySchema = z.object({
 @Controller('market-data/instruments')
 export class MarketDataController {
   constructor(private readonly marketData: MarketDataService) {}
+
+  @Get()
+  listInstruments(): Promise<MarketInstrumentsResponse> {
+    return this.marketData.listInstruments();
+  }
 
   @Get(':symbol')
   getInstrument(
