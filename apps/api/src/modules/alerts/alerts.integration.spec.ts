@@ -25,6 +25,15 @@ const ticker: MarketTicker = {
   source: 'SIMULATED',
   updatedAt: new Date().toISOString(),
 };
+const ethTicker: MarketTicker = {
+  ...ticker,
+  symbol: 'ETH-USD',
+  price: '3500',
+  bid: '3499.95',
+  ask: '3500.05',
+  high24h: '3600',
+  low24h: '3400',
+};
 
 describe('Milestone 6 price alerts', () => {
   const database = new DatabaseService();
@@ -36,7 +45,9 @@ describe('Milestone 6 price alerts', () => {
     })),
   } as unknown as ClerkGateway;
   const marketData = {
-    getCurrentTicker: jest.fn(() => ticker),
+    getCurrentTicker: jest.fn((symbol = 'BTC-USD') =>
+      symbol === 'ETH-USD' ? ethTicker : ticker,
+    ),
   } as unknown as MarketDataService;
   const session = new SessionService(database, clerk);
   const alerts = new AlertsService(database, marketData);
@@ -50,6 +61,20 @@ describe('Milestone 6 price alerts', () => {
       create: {
         symbol: 'BTC-USD',
         baseCurrency: 'BTC',
+        quoteCurrency: 'USD',
+        pricePrecision: 2,
+        quantityPrecision: 8,
+        tickSize: '0.01',
+        lotSize: '0.00000001',
+        minimumQuantity: '0.00000001',
+      },
+      update: {},
+    });
+    await database.client.instrument.upsert({
+      where: { symbol: 'ETH-USD' },
+      create: {
+        symbol: 'ETH-USD',
+        baseCurrency: 'ETH',
         quoteCurrency: 'USD',
         pricePrecision: 2,
         quantityPrecision: 8,
@@ -178,5 +203,32 @@ describe('Milestone 6 price alerts', () => {
         }),
       ]),
     );
+  });
+
+  it('creates and triggers an ETH-USD alert from the ETH stream only', async () => {
+    const created = await alerts.createAlert(identity, {
+      symbol: 'ETH-USD',
+      direction: 'ABOVE',
+      targetPrice: '3550',
+    });
+
+    await alerts.processTicker({ ...ticker, price: '70000' });
+    expect(
+      await database.client.priceAlert.findUniqueOrThrow({
+        where: { id: created.id },
+      }),
+    ).toMatchObject({ status: 'ACTIVE' });
+
+    await alerts.processTicker({
+      ...ethTicker,
+      price: '3551',
+      bid: '3550.95',
+      ask: '3551.05',
+    });
+    expect(
+      await database.client.priceAlert.findUniqueOrThrow({
+        where: { id: created.id },
+      }),
+    ).toMatchObject({ status: 'TRIGGERED' });
   });
 });

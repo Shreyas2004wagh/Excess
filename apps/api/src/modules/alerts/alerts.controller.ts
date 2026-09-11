@@ -7,10 +7,11 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
-import type {
-  CreatePriceAlertRequest,
-  PriceAlertsResponse,
-  PriceAlertSummary,
+import {
+  MARKET_SYMBOLS,
+  type CreatePriceAlertRequest,
+  type PriceAlertsResponse,
+  type PriceAlertSummary,
 } from '@excess/shared-types';
 import { z } from 'zod';
 
@@ -19,7 +20,7 @@ import { CurrentIdentity } from '../auth/current-identity.decorator.js';
 import { AlertsService } from './alerts.service.js';
 
 const createAlertSchema = z.object({
-  symbol: z.literal('BTC-USD'),
+  symbol: z.enum(MARKET_SYMBOLS),
   direction: z.enum(['ABOVE', 'BELOW']),
   targetPrice: z.string().regex(/^\d+(?:\.\d+)?$/),
 });
@@ -37,7 +38,7 @@ export class AlertsController {
     if (!result.success) {
       throw new BadRequestException({
         code: 'INVALID_PRICE_ALERT',
-        message: 'Provide a valid BTC-USD direction and target price',
+        message: 'Provide a valid instrument, direction, and target price',
       });
     }
     return this.alerts.createAlert(

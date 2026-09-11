@@ -25,6 +25,17 @@ const ticker: MarketTicker = {
   source: 'SIMULATED',
   updatedAt: new Date().toISOString(),
 };
+const ethTicker: MarketTicker = {
+  ...ticker,
+  symbol: 'ETH-USD',
+  price: '3500',
+  bid: '3499.95',
+  ask: '3500.05',
+  change24h: '-0.5',
+  high24h: '3600',
+  low24h: '3400',
+  volume24h: '85000',
+};
 
 describe('Milestone 3 market-order execution', () => {
   const database = new DatabaseService();
@@ -36,7 +47,9 @@ describe('Milestone 3 market-order execution', () => {
     })),
   } as unknown as ClerkGateway;
   const marketData = {
-    getCurrentTicker: jest.fn(() => ticker),
+    getCurrentTicker: jest.fn((symbol = 'BTC-USD') =>
+      symbol === 'ETH-USD' ? ethTicker : ticker,
+    ),
   } as unknown as MarketDataService;
   const session = new SessionService(database, clerk);
   const trading = new TradingService(database, marketData);
@@ -49,6 +62,20 @@ describe('Milestone 3 market-order execution', () => {
       create: {
         symbol: 'BTC-USD',
         baseCurrency: 'BTC',
+        quoteCurrency: 'USD',
+        pricePrecision: 2,
+        quantityPrecision: 8,
+        tickSize: '0.01',
+        lotSize: '0.00000001',
+        minimumQuantity: '0.00000001',
+      },
+      update: {},
+    });
+    await database.client.instrument.upsert({
+      where: { symbol: 'ETH-USD' },
+      create: {
+        symbol: 'ETH-USD',
+        baseCurrency: 'ETH',
         quoteCurrency: 'USD',
         pricePrecision: 2,
         quantityPrecision: 8,
@@ -214,6 +241,34 @@ describe('Milestone 3 market-order execution', () => {
         },
       ],
     });
+  });
+
+  it('opens ETH-USD independently and marks both instruments correctly', async () => {
+    const response = await trading.placeMarketOrder(identity, {
+      clientOrderId: randomUUID(),
+      symbol: 'ETH-USD',
+      side: 'BUY',
+      type: 'MARKET',
+      quantity: '1',
+      leverage: 2,
+    });
+
+    expect(response.trade).toMatchObject({
+      symbol: 'ETH-USD',
+      price: '3500.05',
+      quantity: '1',
+    });
+    expect(response.portfolio.positions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ symbol: 'BTC-USD', markPrice: '65000' }),
+        expect.objectContaining({
+          symbol: 'ETH-USD',
+          signedQuantity: '1',
+          markPrice: '3500',
+          leverage: 2,
+        }),
+      ]),
+    );
   });
 });
 

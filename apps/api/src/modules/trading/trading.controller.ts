@@ -7,12 +7,13 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
-import type {
-  OpenOrdersResponse,
-  OrderPlacementRequest,
-  OrderPlacementResponse,
-  OrderSummary,
-  PortfolioSummary,
+import {
+  MARKET_SYMBOLS,
+  type OpenOrdersResponse,
+  type OrderPlacementRequest,
+  type OrderPlacementResponse,
+  type OrderSummary,
+  type PortfolioSummary,
 } from '@excess/shared-types';
 import { z } from 'zod';
 
@@ -26,7 +27,7 @@ const decimalString = z
   .refine((value) => Number(value) > 0);
 const orderBase = z.object({
   clientOrderId: z.uuid(),
-  symbol: z.literal('BTC-USD'),
+  symbol: z.enum(MARKET_SYMBOLS),
   side: z.enum(['BUY', 'SELL']),
   quantity: decimalString,
   leverage: z
@@ -54,7 +55,8 @@ export class TradingController {
     if (!result.success) {
       throw new BadRequestException({
         code: 'INVALID_ORDER',
-        message: 'Provide a valid BTC-USD order, quantity, and required price',
+        message:
+          'Provide a valid supported instrument, quantity, and required price',
       });
     }
     return this.trading.placeOrder(

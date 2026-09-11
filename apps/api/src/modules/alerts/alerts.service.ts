@@ -64,7 +64,7 @@ function serializeAlert(
 export class AlertsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(AlertsService.name);
   private unsubscribeMarketData: (() => void) | null = null;
-  private processingTicker = false;
+  private readonly processingTickers = new Set<string>();
 
   constructor(
     private readonly database: DatabaseService,
@@ -91,7 +91,7 @@ export class AlertsService implements OnApplicationBootstrap, OnModuleDestroy {
     identity: ClerkIdentity,
     request: CreatePriceAlertRequest,
   ): Promise<PriceAlertSummary> {
-    const ticker = this.requireTicker();
+    const ticker = this.requireTicker(request.symbol);
     const user = await this.requireActiveUser(identity);
     const instrument = await this.database.client.instrument.findUnique({
       where: { symbol: request.symbol },
@@ -111,7 +111,7 @@ export class AlertsService implements OnApplicationBootstrap, OnModuleDestroy {
     ) {
       throw new BadRequestException({
         code: 'INVALID_ALERT_PRICE',
-        message: 'Alert price does not satisfy the BTC-USD tick-size rules',
+        message: `Alert price does not satisfy the ${request.symbol} tick-size rules`,
       });
     }
     const currentPrice = new Prisma.Decimal(ticker.price);
@@ -205,8 +205,9 @@ export class AlertsService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   async processTicker(ticker: MarketTicker) {
-    if (ticker.status !== 'LIVE' || this.processingTicker) return;
-    this.processingTicker = true;
+    if (ticker.status !== 'LIVE' || this.processingTickers.has(ticker.symbol))
+      return;
+    this.processingTickers.add(ticker.symbol);
     try {
       const price = new Prisma.Decimal(ticker.price);
       const alerts = await this.database.client.priceAlert.findMany({
@@ -231,7 +232,7 @@ export class AlertsService implements OnApplicationBootstrap, OnModuleDestroy {
         }
       }
     } finally {
-      this.processingTicker = false;
+      this.processingTickers.delete(ticker.symbol);
     }
   }
 
@@ -328,12 +329,12 @@ export class AlertsService implements OnApplicationBootstrap, OnModuleDestroy {
     return user;
   }
 
-  private requireTicker() {
-    const ticker = this.marketData.getCurrentTicker();
+  private requireTicker(symbol: string) {
+    const ticker = this.marketData.getCurrentTicker(symbol);
     if (!ticker || ticker.status !== 'LIVE') {
       throw new ServiceUnavailableException({
         code: 'MARKET_DATA_UNAVAILABLE',
-        message: 'A live BTC-USD price is required to create an alert',
+        message: `A live ${symbol} price is required to create an alert`,
       });
     }
     return ticker;
