@@ -62,6 +62,10 @@ gap loss from making the demo balance negative. Set
 `MARKET_DATA_PROVIDER=mock` for deterministic development or end-to-end tests
 without an external feed.
 
+The terminal also reports all-time realized performance and a newest-first,
+cursor-paginated execution history. Realized results are derived from the immutable
+financial ledger rather than maintained as a second balance source.
+
 One-shot price alerts can watch for a move above or below a BTC-USD or ETH-USD target. A
 trigger is recorded atomically with an outbox delivery event so repeated or
 concurrent ticker processing cannot notify twice. The in-process outbox dispatcher
@@ -97,6 +101,8 @@ The authenticated trading interface is:
 - `GET /api/v1/trading/orders/open` — load accepted pending/protection orders
 - `DELETE /api/v1/trading/orders/:orderId` — cancel an accepted order
 - `GET /api/v1/trading/portfolio` — load balance, equity, and open positions
+- `GET /api/v1/trading/trades` — load cursor-paginated execution history
+- `GET /api/v1/trading/performance` — load all-time execution and realized metrics
 - `POST /api/v1/alerts` — create a one-shot price alert for a supported instrument
 - `GET /api/v1/alerts` — list active, triggered, and cancelled alerts
 - `DELETE /api/v1/alerts/:alertId` — cancel an active alert
@@ -154,6 +160,7 @@ to the final Vercel or custom-domain origin.
 10. Durable in-app alert delivery and administration — complete
 11. Email delivery, Prometheus observability, deployment artifacts, and load testing — complete
 12. Multi-instrument market data, trading, portfolio risk, and alerts — complete for BTC-USD and ETH-USD
+13. Paginated trade history and account performance analytics — complete
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.
