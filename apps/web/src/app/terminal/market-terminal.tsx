@@ -17,6 +17,9 @@ import type {
   PortfolioSummary,
   PriceAlertDirection,
   PriceAlertSummary,
+  TradeHistoryItem,
+  TradeHistoryPage,
+  TradingPerformanceSummary,
   UserProfileSummary,
 } from '@excess/shared-types';
 import type {
@@ -37,6 +40,8 @@ import {
   getOpenOrders,
   getPortfolio,
   getPriceAlerts,
+  getTradeHistory,
+  getTradingPerformance,
   placeOrder,
 } from '../../lib/excess-api';
 import { formatCurrency } from '../../lib/format';
@@ -71,6 +76,15 @@ function orderLabel(order: OrderSummary) {
   if (order.purpose === 'STOP_LOSS') return 'Stop loss';
   if (order.purpose === 'TAKE_PROFIT') return 'Take profit';
   return order.type === 'LIMIT' ? 'Limit' : 'Stop';
+}
+
+function tradePurposeLabel(trade: TradeHistoryItem) {
+  if (trade.purpose === 'STOP_LOSS') return 'Stop loss';
+  if (trade.purpose === 'TAKE_PROFIT') return 'Take profit';
+  if (trade.purpose === 'LIQUIDATION') return 'Liquidation';
+  return trade.orderType === 'MARKET'
+    ? 'Market execution'
+    : `${trade.orderType.toLowerCase()} execution`;
 }
 
 function suggestedPrice(
@@ -145,6 +159,8 @@ export function MarketTerminal({
   openOrders: initialOpenOrders,
   portfolio: initialPortfolio,
   priceAlerts: initialPriceAlerts,
+  performance: initialPerformance,
+  tradeHistory: initialTradeHistory,
   user,
 }: {
   candlesBySymbol: Record<MarketSymbol, CandleHistoryResponse>;
@@ -152,6 +168,8 @@ export function MarketTerminal({
   openOrders: OrderSummary[];
   portfolio: PortfolioSummary;
   priceAlerts: PriceAlertSummary[];
+  performance: TradingPerformanceSummary;
+  tradeHistory: TradeHistoryPage;
   user: UserProfileSummary;
 }) {
   const { getToken } = useAuth();
@@ -190,6 +208,15 @@ export function MarketTerminal({
     useState<OrderSummary[]>(initialOpenOrders);
   const [priceAlerts, setPriceAlerts] =
     useState<PriceAlertSummary[]>(initialPriceAlerts);
+  const [performance, setPerformance] =
+    useState<TradingPerformanceSummary>(initialPerformance);
+  const [tradeHistory, setTradeHistory] =
+    useState<TradeHistoryPage>(initialTradeHistory);
+  const [hasExpandedTradeHistory, setHasExpandedTradeHistory] = useState(false);
+  const [isLoadingMoreTrades, setIsLoadingMoreTrades] = useState(false);
+  const [tradeHistoryError, setTradeHistoryError] = useState<string | null>(
+    null,
+  );
   const [alertDirection, setAlertDirection] =
     useState<PriceAlertDirection>('ABOVE');
   const [alertPrice, setAlertPrice] = useState(
@@ -333,15 +360,37 @@ export function MarketTerminal({
     const refresh = async () => {
       const token = await getToken();
       if (!token) return;
-      const [nextPortfolio, nextOrders, nextAlerts] = await Promise.all([
+      const [
+        nextPortfolio,
+        nextOrders,
+        nextAlerts,
+        nextHistory,
+        nextPerformance,
+      ] = await Promise.all([
         getPortfolio(token),
         getOpenOrders(token),
         getPriceAlerts(token),
+        getTradeHistory(token),
+        getTradingPerformance(token),
       ]);
       if (!disposed) {
         setPortfolio(nextPortfolio);
         setOpenOrders(nextOrders.items);
         setPriceAlerts(nextAlerts.items);
+        setTradeHistory((current) => {
+          if (!hasExpandedTradeHistory) return nextHistory;
+          const refreshedIds = new Set(
+            nextHistory.items.map((trade) => trade.id),
+          );
+          return {
+            items: [
+              ...nextHistory.items,
+              ...current.items.filter((trade) => !refreshedIds.has(trade.id)),
+            ],
+            nextCursor: current.nextCursor,
+          };
+        });
+        setPerformance(nextPerformance);
       }
     };
     const interval = setInterval(() => {
@@ -351,7 +400,7 @@ export function MarketTerminal({
       disposed = true;
       clearInterval(interval);
     };
-  }, [getToken]);
+  }, [getToken, hasExpandedTradeHistory]);
 
   const change = Number(ticker.change24h);
   const positive = change >= 0;
@@ -441,7 +490,15 @@ export function MarketTerminal({
       const response = await placeOrder(token, request);
       setPortfolio(response.portfolio);
       setLastOrder(response);
-      setOpenOrders((await getOpenOrders(token)).items);
+      const [nextOrders, nextHistory, nextPerformance] = await Promise.all([
+        getOpenOrders(token),
+        getTradeHistory(token),
+        getTradingPerformance(token),
+      ]);
+      setOpenOrders(nextOrders.items);
+      setTradeHistory(nextHistory);
+      setHasExpandedTradeHistory(false);
+      setPerformance(nextPerformance);
     } catch (error) {
       setOrderError(
         error instanceof ExcessApiError
@@ -534,6 +591,38 @@ export function MarketTerminal({
       );
     } finally {
       setCancellingAlertId(null);
+    }
+  }
+
+  async function loadMoreTrades() {
+    if (!tradeHistory.nextCursor || isLoadingMoreTrades) return;
+    setIsLoadingMoreTrades(true);
+    setTradeHistoryError(null);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Your session expired. Sign in again.');
+      const nextPage = await getTradeHistory(token, {
+        cursor: tradeHistory.nextCursor,
+      });
+      setTradeHistory((current) => ({
+        items: [
+          ...current.items,
+          ...nextPage.items.filter(
+            (trade) =>
+              !current.items.some((existing) => existing.id === trade.id),
+          ),
+        ],
+        nextCursor: nextPage.nextCursor,
+      }));
+      setHasExpandedTradeHistory(true);
+    } catch (error) {
+      setTradeHistoryError(
+        error instanceof Error
+          ? error.message
+          : 'More executions could not be loaded.',
+      );
+    } finally {
+      setIsLoadingMoreTrades(false);
     }
   }
 
@@ -1099,6 +1188,156 @@ export function MarketTerminal({
             tracking live P/L.
           </p>
         )}
+      </section>
+
+      <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+              Performance
+            </p>
+            <h2 className="mt-2 text-lg font-semibold">Trading activity</h2>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              All-time execution and realized results across your demo account.
+            </p>
+          </div>
+          <span className="rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[10px] text-[var(--muted)]">
+            {performance.activePositions} open position
+            {performance.activePositions === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        <div
+          className="mt-5 grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-6"
+          data-testid="trading-performance"
+        >
+          {[
+            [
+              'Net realized P/L',
+              formatCurrency(
+                performance.netRealizedPnl,
+                livePortfolio.account.baseCurrency,
+              ),
+            ],
+            [
+              'Win rate',
+              performance.winRate === null
+                ? '—'
+                : `${decimal(performance.winRate)}%`,
+            ],
+            ['Executions', String(performance.totalTrades)],
+            [
+              'Wins / losses',
+              `${performance.winningTrades} / ${performance.losingTrades}`,
+            ],
+            [
+              'Traded notional',
+              formatCurrency(
+                performance.tradedNotional,
+                livePortfolio.account.baseCurrency,
+              ),
+            ],
+            [
+              'Average execution',
+              formatCurrency(
+                performance.averageTradeNotional,
+                livePortfolio.account.baseCurrency,
+              ),
+            ],
+          ].map(([label, value]) => (
+            <div className="bg-[var(--surface)] px-4 py-4" key={label}>
+              <p className="text-[11px] text-[var(--muted)]">{label}</p>
+              <p
+                className={`mt-1 font-mono text-sm ${
+                  label === 'Net realized P/L'
+                    ? Number(performance.netRealizedPnl) >= 0
+                      ? 'text-[var(--accent)]'
+                      : 'text-rose-300'
+                    : ''
+                }`}
+              >
+                {value}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {tradeHistory.items.length > 0 ? (
+          <div className="mt-5 space-y-2" data-testid="trade-history">
+            {tradeHistory.items.map((trade) => (
+              <div
+                className="grid items-center gap-3 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-[1.1fr_0.8fr_1.2fr_0.7fr_1fr]"
+                key={trade.id}
+              >
+                <div>
+                  <p className="font-semibold">{trade.symbol}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {new Date(trade.executedAt).toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    className={`font-mono text-xs ${trade.side === 'BUY' ? 'text-[var(--accent)]' : 'text-rose-300'}`}
+                  >
+                    {trade.side}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {tradePurposeLabel(trade)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-[var(--muted)]">Execution</p>
+                  <p className="mt-1 font-mono">
+                    {trade.quantity} @ ${decimal(trade.price)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-[var(--muted)]">Leverage</p>
+                  <p className="mt-1 font-mono">{trade.leverage}×</p>
+                </div>
+                <div className="sm:text-right">
+                  <p className="text-xs text-[var(--muted)]">Realized P/L</p>
+                  <p
+                    className={`mt-1 font-mono ${
+                      trade.realizedPnl === null
+                        ? 'text-[var(--muted)]'
+                        : Number(trade.realizedPnl) >= 0
+                          ? 'text-[var(--accent)]'
+                          : 'text-rose-300'
+                    }`}
+                  >
+                    {trade.realizedPnl === null
+                      ? '—'
+                      : formatCurrency(
+                          trade.realizedPnl,
+                          livePortfolio.account.baseCurrency,
+                        )}
+                  </p>
+                </div>
+              </div>
+            ))}
+            {tradeHistory.nextCursor ? (
+              <button
+                className="mt-3 w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)] transition hover:border-[var(--accent)]/30 hover:text-[var(--foreground)] disabled:cursor-wait disabled:opacity-50"
+                disabled={isLoadingMoreTrades}
+                onClick={() => void loadMoreTrades()}
+                type="button"
+              >
+                {isLoadingMoreTrades ? 'Loading executions…' : 'Load more'}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-5 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
+            No executions yet. Filled orders will appear here with their
+            realized result.
+          </p>
+        )}
+        {tradeHistoryError ? (
+          <p className="mt-3 text-sm text-rose-200" role="alert">
+            {tradeHistoryError}
+          </p>
+        ) : null}
       </section>
 
       <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">

@@ -19,6 +19,8 @@ import type {
   PriceAlertsResponse,
   PriceAlertSummary,
   SessionBootstrapResponse,
+  TradeHistoryPage,
+  TradingPerformanceSummary,
 } from '@excess/shared-types';
 
 export class ExcessApiError extends Error {
@@ -125,6 +127,22 @@ export function placeOrder(token: string, order: OrderPlacementRequest) {
 
 export function getOpenOrders(token: string) {
   return request<OpenOrdersResponse>('/trading/orders/open', token);
+}
+
+export function getTradeHistory(
+  token: string,
+  options: { limit?: number; cursor?: string; symbol?: MarketSymbol } = {},
+) {
+  const query = new URLSearchParams({
+    limit: String(options.limit ?? 20),
+  });
+  if (options.cursor) query.set('cursor', options.cursor);
+  if (options.symbol) query.set('symbol', options.symbol);
+  return request<TradeHistoryPage>(`/trading/trades?${query}`, token);
+}
+
+export function getTradingPerformance(token: string) {
+  return request<TradingPerformanceSummary>('/trading/performance', token);
 }
 
 export function cancelOrder(token: string, orderId: string) {

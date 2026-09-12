@@ -77,6 +77,13 @@ test('renders and switches the authenticated multi-market terminal', async ({
   await page.getByRole('button', { name: '2×', exact: true }).click();
   await page.getByRole('button', { name: 'Buy BTC · market' }).click();
   await expect(page.getByRole('status')).toContainText('Filled 0.01 BTC at $');
+  await expect(page.getByTestId('trading-performance')).toContainText(
+    'Executions',
+  );
+  await expect(page.getByTestId('trade-history')).toContainText('BTC-USD');
+  await expect(page.getByTestId('trade-history')).toContainText(
+    'Market execution',
+  );
   await expect(page.getByText('LONG', { exact: true })).toBeVisible();
   await expect(page.getByText(/2× · \$/)).toBeVisible();
   await expect(page.getByTestId('risk-state')).toHaveText('HEALTHY');
