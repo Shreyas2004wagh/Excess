@@ -28,6 +28,7 @@ import type {
   Leverage,
   MarketOrderRequest,
   MarketOrderResponse,
+  MarketSymbol,
   MarketTicker,
   OpenOrdersResponse,
   OrderPlacementRequest,
@@ -35,7 +36,10 @@ import type {
   OrderSummary,
   PortfolioSummary,
   PositionSummary,
+  TradeHistoryItem,
+  TradeHistoryPage,
   TradeSummary,
+  TradingPerformanceSummary,
 } from '@excess/shared-types';
 import {
   calculateAccountMetrics,
@@ -64,6 +68,9 @@ type OrderWithReceipt = Prisma.OrderGetPayload<{
   include: { instrument: true; trades: { take: 1 } };
 }>;
 type TradeContext = { user: User; account: Account; instrument: Instrument };
+type TradeHistoryRecord = Prisma.TradeGetPayload<{
+  include: { instrument: true; order: true };
+}>;
 type RiskPosition = {
   signedQuantity: Prisma.Decimal;
   averageEntryPrice: Prisma.Decimal | null;
@@ -129,6 +136,28 @@ function serializeTrade(
     spreadBps: trade.spreadBps.toString(),
     slippageBps: trade.slippageBps.toString(),
     executedAt: trade.executedAt.toISOString(),
+  };
+}
+
+function serializeTradeHistoryItem(
+  trade: TradeHistoryRecord,
+  realizedPnl: Prisma.Decimal | null,
+): TradeHistoryItem {
+  return {
+    id: trade.id,
+    orderId: trade.orderId,
+    symbol: trade.instrument.symbol,
+    side: trade.side,
+    price: trade.price.toString(),
+    quantity: trade.quantity.toString(),
+    fee: trade.fee.toString(),
+    spreadBps: trade.spreadBps.toString(),
+    slippageBps: trade.slippageBps.toString(),
+    executedAt: trade.executedAt.toISOString(),
+    orderType: trade.order.type,
+    purpose: trade.order.purpose,
+    leverage: Number(trade.order.leverage) as Leverage,
+    realizedPnl: realizedPnl?.toString() ?? null,
   };
 }
 
@@ -322,6 +351,144 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     return { items: orders.map(serializeOrder) };
+  }
+
+  async getTradeHistory(
+    identity: ClerkIdentity,
+    query: { limit: number; cursor?: string; symbol?: MarketSymbol },
+  ): Promise<TradeHistoryPage> {
+    const account = await this.findAccountWithPositions(identity);
+    let cursorBoundary: { executedAt: Date; id: string } | undefined;
+    if (query.cursor) {
+      const cursor = await this.database.client.trade.findFirst({
+        where: {
+          id: query.cursor,
+          accountId: account.id,
+          ...(query.symbol
+            ? { instrument: { symbol: query.symbol } }
+            : undefined),
+        },
+        select: { id: true, executedAt: true },
+      });
+      if (!cursor) {
+        throw new BadRequestException({
+          code: 'TRADE_CURSOR_NOT_FOUND',
+          message: 'The trade-history cursor is invalid',
+        });
+      }
+      cursorBoundary = cursor;
+    }
+
+    const trades = await this.database.client.trade.findMany({
+      where: {
+        accountId: account.id,
+        ...(query.symbol
+          ? { instrument: { symbol: query.symbol } }
+          : undefined),
+        ...(cursorBoundary
+          ? {
+              OR: [
+                { executedAt: { lt: cursorBoundary.executedAt } },
+                {
+                  executedAt: cursorBoundary.executedAt,
+                  id: { lt: cursorBoundary.id },
+                },
+              ],
+            }
+          : undefined),
+      },
+      include: { instrument: true, order: true },
+      orderBy: [{ executedAt: 'desc' }, { id: 'desc' }],
+      take: query.limit + 1,
+    });
+    const pageItems = trades.slice(0, query.limit);
+    const realizedEntries = await this.database.client.ledgerEntry.findMany({
+      where: {
+        accountId: account.id,
+        type: 'REALIZED_PNL',
+        referenceType: 'TRADE',
+        referenceId: { in: pageItems.map((trade) => trade.id) },
+      },
+      select: { referenceId: true, amount: true },
+    });
+    const realizedByTrade = new Map(
+      realizedEntries.flatMap((entry) =>
+        entry.referenceId ? [[entry.referenceId, entry.amount] as const] : [],
+      ),
+    );
+
+    return {
+      items: pageItems.map((trade) =>
+        serializeTradeHistoryItem(trade, realizedByTrade.get(trade.id) ?? null),
+      ),
+      nextCursor:
+        trades.length > query.limit ? (pageItems.at(-1)?.id ?? null) : null,
+    };
+  }
+
+  async getPerformance(
+    identity: ClerkIdentity,
+  ): Promise<TradingPerformanceSummary> {
+    const account = await this.findAccountWithPositions(identity);
+    const [trades, realizedEntries] = await Promise.all([
+      this.database.client.trade.findMany({
+        where: { accountId: account.id },
+        select: { price: true, quantity: true },
+      }),
+      this.database.client.ledgerEntry.findMany({
+        where: { accountId: account.id, type: 'REALIZED_PNL' },
+        select: { amount: true },
+      }),
+    ]);
+    const zero = new Prisma.Decimal(0);
+    const tradedNotional = trades.reduce(
+      (total, trade) => total.plus(trade.price.mul(trade.quantity)),
+      zero,
+    );
+    const realizedValues = realizedEntries.map((entry) => entry.amount);
+    const wins = realizedValues.filter((amount) => amount.isPositive());
+    const losses = realizedValues.filter((amount) => amount.isNegative());
+    const grossProfit = wins.reduce(
+      (total, amount) => total.plus(amount),
+      zero,
+    );
+    const grossLoss = losses.reduce(
+      (total, amount) => total.plus(amount),
+      zero,
+    );
+    const netRealizedPnl = grossProfit.plus(grossLoss);
+    const resolvedTrades = wins.length + losses.length;
+
+    return {
+      totalTrades: trades.length,
+      activePositions: account.positions.filter(
+        (position) => !position.signedQuantity.isZero(),
+      ).length,
+      realizedEvents: realizedEntries.length,
+      winningTrades: wins.length,
+      losingTrades: losses.length,
+      winRate:
+        resolvedTrades === 0
+          ? null
+          : new Prisma.Decimal(wins.length)
+              .div(resolvedTrades)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toString(),
+      grossProfit: grossProfit.toString(),
+      grossLoss: grossLoss.toString(),
+      netRealizedPnl: netRealizedPnl.toString(),
+      tradedNotional: tradedNotional.toString(),
+      averageTradeNotional:
+        trades.length === 0
+          ? '0'
+          : tradedNotional.div(trades.length).toDecimalPlaces(2).toString(),
+      largestWin:
+        wins.length === 0 ? null : Prisma.Decimal.max(...wins).toString(),
+      largestLoss:
+        losses.length === 0 ? null : Prisma.Decimal.min(...losses).toString(),
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   async cancelOrder(

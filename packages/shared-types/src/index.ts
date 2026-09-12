@@ -141,6 +141,35 @@ export interface TradeSummary {
   executedAt: string;
 }
 
+export interface TradeHistoryItem extends TradeSummary {
+  orderType: OrderType;
+  purpose: OrderPurpose;
+  leverage: Leverage;
+  realizedPnl: DecimalString | null;
+}
+
+export interface TradeHistoryPage {
+  items: TradeHistoryItem[];
+  nextCursor: string | null;
+}
+
+export interface TradingPerformanceSummary {
+  totalTrades: number;
+  activePositions: number;
+  realizedEvents: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: DecimalString | null;
+  grossProfit: DecimalString;
+  grossLoss: DecimalString;
+  netRealizedPnl: DecimalString;
+  tradedNotional: DecimalString;
+  averageTradeNotional: DecimalString;
+  largestWin: DecimalString | null;
+  largestLoss: DecimalString | null;
+  generatedAt: string;
+}
+
 export interface PositionSummary {
   id: string;
   symbol: string;

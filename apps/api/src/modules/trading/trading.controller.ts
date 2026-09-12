@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   MARKET_SYMBOLS,
@@ -14,6 +15,8 @@ import {
   type OrderPlacementResponse,
   type OrderSummary,
   type PortfolioSummary,
+  type TradeHistoryPage,
+  type TradingPerformanceSummary,
 } from '@excess/shared-types';
 import { z } from 'zod';
 
@@ -41,6 +44,11 @@ const orderSchema = z.discriminatedUnion('type', [
   orderBase.extend({ type: z.literal('LIMIT'), limitPrice: decimalString }),
   orderBase.extend({ type: z.literal('STOP'), stopPrice: decimalString }),
 ]);
+const tradeHistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.uuid().optional(),
+  symbol: z.enum(MARKET_SYMBOLS).optional(),
+});
 
 @Controller('trading')
 export class TradingController {
@@ -77,6 +85,28 @@ export class TradingController {
     @CurrentIdentity() identity: ClerkIdentity,
   ): Promise<OpenOrdersResponse> {
     return this.trading.getOpenOrders(identity);
+  }
+
+  @Get('trades')
+  getTradeHistory(
+    @CurrentIdentity() identity: ClerkIdentity,
+    @Query() query: Record<string, string | undefined>,
+  ): Promise<TradeHistoryPage> {
+    const result = tradeHistoryQuerySchema.safeParse(query);
+    if (!result.success) {
+      throw new BadRequestException({
+        code: 'INVALID_TRADE_HISTORY_QUERY',
+        message: 'Use a valid symbol, cursor, and limit between 1 and 100',
+      });
+    }
+    return this.trading.getTradeHistory(identity, result.data);
+  }
+
+  @Get('performance')
+  getPerformance(
+    @CurrentIdentity() identity: ClerkIdentity,
+  ): Promise<TradingPerformanceSummary> {
+    return this.trading.getPerformance(identity);
   }
 
   @Delete('orders/:orderId')

@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
-import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { jest } from '@jest/globals';
 import type { MarketTicker } from '@excess/shared-types';
 
@@ -269,6 +272,61 @@ describe('Milestone 3 market-order execution', () => {
         }),
       ]),
     );
+  });
+
+  it('paginates execution history and calculates account performance', async () => {
+    const firstPage = await trading.getTradeHistory(identity, { limit: 2 });
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.items[0]).toMatchObject({
+      symbol: 'ETH-USD',
+      orderType: 'MARKET',
+      purpose: 'ENTRY',
+      leverage: 2,
+      realizedPnl: null,
+    });
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const secondPage = await trading.getTradeHistory(identity, {
+      limit: 2,
+      cursor: firstPage.nextCursor!,
+    });
+    expect(secondPage.items).toHaveLength(2);
+    expect(
+      new Set(
+        [...firstPage.items, ...secondPage.items].map((trade) => trade.id),
+      ).size,
+    ).toBe(4);
+    expect(
+      (
+        await trading.getTradeHistory(identity, {
+          limit: 20,
+          symbol: 'ETH-USD',
+        })
+      ).items,
+    ).toHaveLength(1);
+
+    await expect(
+      trading.getTradeHistory(identity, {
+        limit: 20,
+        cursor: randomUUID(),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(await trading.getPerformance(identity)).toMatchObject({
+      totalTrades: 4,
+      activePositions: 2,
+      realizedEvents: 1,
+      winningTrades: 1,
+      losingTrades: 0,
+      winRate: '100',
+      grossProfit: '99.95',
+      grossLoss: '0',
+      netRealizedPnl: '99.95',
+      tradedNotional: '19900.1',
+      averageTradeNotional: '4975.03',
+      largestWin: '99.95',
+      largestLoss: null,
+    });
   });
 });
 
