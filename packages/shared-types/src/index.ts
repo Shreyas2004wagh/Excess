@@ -153,6 +153,44 @@ export interface TradeHistoryPage {
   nextCursor: string | null;
 }
 
+export interface TradingReportFilters {
+  /** Inclusive UTC calendar dates; at most 366 days. */
+  from: string;
+  to: string;
+  symbol: MarketSymbol | null;
+  /** Execution-time cutoff, reused for pagination and export. */
+  asOf: string;
+}
+
+export interface TradingReportTotals {
+  executions: number;
+  tradedNotional: DecimalString;
+  fees: DecimalString;
+  /** Applied REALIZED_PNL ledger amounts, including negative-balance protection. */
+  creditedRealizedPnl: DecimalString;
+}
+
+export interface TradingReportDay extends TradingReportTotals {
+  date: string;
+  cumulativeRealizedPnl: DecimalString;
+}
+
+export interface TradingReport {
+  filters: TradingReportFilters;
+  summary: TradingReportTotals;
+  days: TradingReportDay[];
+  trades: TradeHistoryPage;
+}
+
+export interface TradingReportQuery {
+  from?: string;
+  to?: string;
+  symbol?: MarketSymbol;
+  asOf?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface TradingPerformanceSummary {
   totalTrades: number;
   activePositions: number;
