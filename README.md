@@ -66,6 +66,30 @@ The terminal also reports all-time realized performance and a newest-first,
 cursor-paginated execution history. Realized results are derived from the immutable
 financial ledger rather than maintained as a second balance source.
 
+Open `/reports` for UTC date and instrument filters, daily realized results,
+execution totals, traded notional, recorded fees, and a full-range CSV download.
+Reports default to the last 30 UTC calendar days and allow up to 366 days.
+Both date endpoints are inclusive. Successful filters persist in the page URL.
+Pagination and downloads reuse the returned execution-time `asOf` cutoff, so
+executions after that cutoff are excluded. Each request uses a repeatable-read
+transaction; `asOf` is not a persisted database snapshot, so transactions that
+commit late with an earlier execution timestamp can appear on subsequent reads.
+Apply the filters again to refresh the cutoff.
+
+Credited realized P/L is the sum of `REALIZED_PNL` ledger amounts linked to the
+selected executions, including any negative-balance protection. It excludes
+unrealized P/L, opening credits, and adjustments. Fees are reported separately;
+the report does not compute an additional net-after-fees metric. Daily cumulative P/L starts at zero for the selected
+period; it is not account equity or a balance history. An execution without a
+realized ledger entry displays `—` and exports an empty realized-P/L cell; this
+does not distinguish an opening trade from a break-even close.
+
+The CSV contains every matching execution, not just the visible page, and retains
+full decimal precision. Exports over 10,000 rows fail with
+`REPORT_EXPORT_TOO_LARGE`; narrow the range or instrument instead of receiving
+silently truncated data. Reports are private, uncached, and available only to the
+authenticated account owner. No additional service or migration is needed.
+
 One-shot price alerts can watch for a move above or below a BTC-USD or ETH-USD target. A
 trigger is recorded atomically with an outbox delivery event so repeated or
 concurrent ticker processing cannot notify twice. The in-process outbox dispatcher
@@ -103,6 +127,8 @@ The authenticated trading interface is:
 - `GET /api/v1/trading/portfolio` — load balance, equity, and open positions
 - `GET /api/v1/trading/trades` — load cursor-paginated execution history
 - `GET /api/v1/trading/performance` — load all-time execution and realized metrics
+- `GET /api/v1/reports/trading` — load filtered totals, daily results, and executions
+- `GET /api/v1/reports/trading/export` — download all filtered executions as CSV
 - `POST /api/v1/alerts` — create a one-shot price alert for a supported instrument
 - `GET /api/v1/alerts` — list active, triggered, and cancelled alerts
 - `DELETE /api/v1/alerts/:alertId` — cancel an active alert
@@ -111,6 +137,15 @@ The authenticated trading interface is:
 - `POST /api/v1/notifications/read-all` — mark every notification read
 - `GET /api/v1/admin/overview` — load administrator operations metrics
 - `POST /api/v1/admin/deliveries/:eventId/retry` — requeue a failed delivery
+
+Report queries accept `from=YYYY-MM-DD`, `to=YYYY-MM-DD`, optional
+`symbol=BTC-USD|ETH-USD`, and optional `asOf=<UTC ISO timestamp>`. JSON reports
+also accept `limit=1..100` (default 20) and `cursor=<execution UUID>`; cursor
+requests must include the original `asOf` value and should reuse the other filters.
+CSV requests must omit `cursor` and `limit`. Invalid filters return
+`INVALID_REPORT_QUERY` (400); cursors outside the account/range return
+`INVALID_REPORT_CURSOR` (400). Suspended identities and non-active accounts
+cannot read or export reports.
 
 ## Quality checks
 
@@ -161,6 +196,7 @@ to the final Vercel or custom-domain origin.
 11. Email delivery, Prometheus observability, deployment artifacts, and load testing — complete
 12. Multi-instrument market data, trading, portfolio risk, and alerts — complete for BTC-USD and ETH-USD
 13. Paginated trade history and account performance analytics — complete
+14. Date-filtered trading reports, daily results, and CSV export — complete
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.
