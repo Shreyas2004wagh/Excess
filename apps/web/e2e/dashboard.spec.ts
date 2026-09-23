@@ -1,6 +1,8 @@
 import { clerk, setupClerkTestingToken } from '@clerk/testing/playwright';
 import { expect, test } from '@playwright/test';
 import { prisma } from '@excess/database';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 
 test('redirects an unauthenticated visitor away from the dashboard', async ({
   page,
@@ -9,6 +11,236 @@ test('redirects an unauthenticated visitor away from the dashboard', async ({
   await page.goto('/dashboard');
 
   await expect(page).toHaveURL(/\/sign-in/);
+});
+
+test('protects reports and CSV exports from unauthenticated requests', async ({
+  page,
+  request,
+}) => {
+  await setupClerkTestingToken({ page });
+  await page.goto('/reports');
+  await expect(page).toHaveURL(/\/sign-in/);
+  for (const endpoint of ['/reports/trading', '/reports/trading/export']) {
+    const response = await request.get(
+      `http://localhost:4000/api/v1${endpoint}`,
+    );
+    expect(response.status()).toBe(401);
+  }
+});
+
+test('filters, paginates, refreshes, and exports an authenticated trading report', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  const email = process.env.E2E_CLERK_USER_EMAIL;
+  if (!email) throw new Error('E2E_CLERK_USER_EMAIL is required');
+  await setupClerkTestingToken({ page });
+  await page.goto('/');
+  await clerk.signIn({ page, emailAddress: email });
+  await page.goto('/dashboard');
+  await expect(
+    page.getByRole('link', { name: 'Reports', exact: true }),
+  ).toBeVisible();
+  const user = await prisma.user.findFirstOrThrow({
+    where: { email },
+    include: { accounts: true },
+  });
+  const accountId = user.accounts.find(
+    (account) => account.type === 'DEMO' && account.baseCurrency === 'USD',
+  )!.id;
+  const instruments = await prisma.instrument.findMany({
+    where: { symbol: { in: ['BTC-USD', 'ETH-USD'] } },
+  });
+  const fixtures = Array.from({ length: 26 }, (_, index) => ({
+    orderId: randomUUID(),
+    tradeId: randomUUID(),
+    instrumentId: instruments.find(
+      (instrument) =>
+        instrument.symbol === (index === 25 ? 'ETH-USD' : 'BTC-USD'),
+    )!.id,
+    executedAt: new Date(
+      `2024-06-02T12:00:${String(index).padStart(2, '0')}.000Z`,
+    ),
+  }));
+  try {
+    await prisma.$transaction([
+      prisma.order.createMany({
+        data: fixtures.map((fixture) => ({
+          id: fixture.orderId,
+          accountId,
+          instrumentId: fixture.instrumentId,
+          clientOrderId: fixture.orderId,
+          side: 'BUY',
+          type: 'MARKET',
+          quantity: '0.01',
+          status: 'FILLED',
+          executedQuantity: '0.01',
+          averageFillPrice: '100.1234567891',
+        })),
+      }),
+      prisma.trade.createMany({
+        data: fixtures.map((fixture) => ({
+          id: fixture.tradeId,
+          orderId: fixture.orderId,
+          accountId,
+          instrumentId: fixture.instrumentId,
+          side: 'BUY',
+          price: '100.1234567891',
+          quantity: '0.01',
+          executedAt: fixture.executedAt,
+        })),
+      }),
+      prisma.ledgerEntry.createMany({
+        data: [
+          {
+            accountId,
+            type: 'REALIZED_PNL',
+            amount: '2.5',
+            balanceAfter: '10002.5',
+            referenceType: 'TRADE',
+            referenceId: fixtures[24]!.tradeId,
+          },
+          {
+            accountId,
+            type: 'REALIZED_PNL',
+            amount: '-1.25',
+            balanceAfter: '10001.25',
+            referenceType: 'TRADE',
+            referenceId: fixtures[25]!.tradeId,
+          },
+        ],
+      }),
+    ]);
+    await page.getByRole('link', { name: 'Reports', exact: true }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Trading reports', exact: true }),
+    ).toBeVisible();
+    await page.getByLabel('From (UTC)').fill('2024-06-01');
+    await page.getByLabel('To (UTC)').fill('2024-06-03');
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect(page.getByTestId('report-range')).toContainText(
+      '2024-06-01 through 2024-06-03',
+    );
+    await expect(page.getByTestId('report-summary')).toContainText('$1.25');
+    await expect(page.getByTestId('report-trades')).toContainText(
+      '20 of 26 executions',
+    );
+
+    // The CSV must include all 26 results even before loading the next page.
+    const downloadEvent = page.waitForEvent('download');
+    const exportResponseEvent = page.waitForResponse((response) =>
+      response.url().includes('/reports/trading/export?'),
+    );
+    await page.getByRole('button', { name: 'Export CSV' }).click();
+    const download = await downloadEvent;
+    const exportResponse = await exportResponseEvent;
+    expect(exportResponse.headers()['content-type']).toContain('text/csv');
+    expect(exportResponse.headers()['cache-control']).toContain('no-store');
+    expect(download.suggestedFilename()).toBe(
+      'excess-trades-2024-06-01-2024-06-03.csv',
+    );
+    const csv = await readFile((await download.path())!, 'utf8');
+    expect(csv.trim().split('\r\n')).toHaveLength(27);
+    expect(csv).toContain('100.1234567891');
+    expect(csv).toContain(fixtures[0]!.tradeId);
+
+    await page.getByRole('button', { name: 'Load more executions' }).click();
+    await expect(page.getByTestId('report-trades')).toContainText(
+      '26 of 26 executions',
+    );
+    await expect(
+      page.getByTestId('report-trades').locator('tbody tr'),
+    ).toHaveCount(26);
+    await page.screenshot({
+      path: testInfo.outputPath('reports-desktop.png'),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: testInfo.outputPath('reports-mobile.png'),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+
+    // A transient filter failure must preserve the current result and allow retry.
+    await page.route(
+      '**/api/v1/reports/trading?*',
+      (route) =>
+        route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': 'http://localhost:3000' },
+          body: JSON.stringify({
+            code: 'TEMPORARY_FAILURE',
+            message: 'Temporary report failure',
+          }),
+        }),
+      { times: 1 },
+    );
+    await page
+      .getByRole('combobox', { name: 'Instrument', exact: true })
+      .selectOption('ETH-USD');
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Temporary report failure' }),
+    ).toBeVisible();
+    await expect(page.getByTestId('report-trades')).toContainText(
+      '26 of 26 executions',
+    );
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect(page.getByTestId('report-trades')).toContainText(
+      '1 of 1 executions',
+    );
+    await expect(page.getByTestId('report-trades')).not.toContainText(
+      'BTC-USD',
+    );
+    await expect(page.getByTestId('report-summary')).toContainText('-$1.25');
+    await expect(page).toHaveURL(/symbol=ETH-USD/);
+    await page.reload();
+    await expect(
+      page.getByRole('combobox', { name: 'Instrument', exact: true }),
+    ).toHaveValue('ETH-USD');
+    await expect(page.getByTestId('report-trades')).toContainText(
+      '1 of 1 executions',
+    );
+
+    await page.getByLabel('From (UTC)').fill('2024-05-01');
+    await page.getByLabel('To (UTC)').fill('2024-05-02');
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect(
+      page.getByText(
+        'No executions match these filters. Try another period or instrument.',
+      ),
+    ).toBeVisible();
+    await page.goto('/reports?from=2024-02-30&to=2024-03-01');
+    await expect(
+      page.getByRole('heading', { name: 'Check your report filters' }),
+    ).toBeVisible();
+    await page.getByRole('link', { name: 'Reset filters' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Trading reports', exact: true }),
+    ).toBeVisible();
+  } finally {
+    await prisma.$transaction([
+      prisma.ledgerEntry.deleteMany({
+        where: {
+          accountId,
+          referenceType: 'TRADE',
+          referenceId: { in: fixtures.map((fixture) => fixture.tradeId) },
+        },
+      }),
+      prisma.trade.deleteMany({
+        where: { id: { in: fixtures.map((fixture) => fixture.tradeId) } },
+      }),
+      prisma.order.deleteMany({
+        where: { id: { in: fixtures.map((fixture) => fixture.orderId) } },
+      }),
+    ]);
+  }
 });
 
 test('provisions one demo account and keeps it after refresh', async ({

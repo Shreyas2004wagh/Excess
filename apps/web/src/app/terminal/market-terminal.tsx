@@ -648,7 +648,7 @@ export function MarketTerminal({
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <div className="hidden text-right text-xs sm:block">
             <p className="text-[var(--muted)]">Demo balance</p>
             <p className="mt-0.5 font-mono">
@@ -660,6 +660,9 @@ export function MarketTerminal({
           </div>
           <Link className="button button-secondary" href="/dashboard">
             Dashboard
+          </Link>
+          <Link className="button button-secondary" href="/reports">
+            Reports
           </Link>
           <Link className="button button-secondary" href="/notifications">
             Notifications

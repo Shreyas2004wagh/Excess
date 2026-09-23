@@ -33,14 +33,17 @@ export default async function DashboardPage() {
 
     return (
       <main className="mx-auto min-h-screen max-w-6xl px-6 py-8 sm:px-10">
-        <nav className="flex items-center justify-between border-b border-[var(--border)] pb-6">
+        <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border)] pb-6">
           <Link
             className="font-mono text-lg font-semibold tracking-[0.18em]"
             href="/"
           >
             EXCESS
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Link className="button button-secondary" href="/reports">
+              Reports
+            </Link>
             <Link className="button button-secondary" href="/notifications">
               Notifications
             </Link>

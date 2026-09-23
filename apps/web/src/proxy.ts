@@ -4,6 +4,7 @@ export default clerkMiddleware(async (auth, request) => {
   if (
     request.nextUrl.pathname.startsWith('/dashboard') ||
     request.nextUrl.pathname.startsWith('/terminal') ||
+    request.nextUrl.pathname.startsWith('/reports') ||
     request.nextUrl.pathname.startsWith('/notifications') ||
     request.nextUrl.pathname.startsWith('/admin')
   ) {

@@ -21,6 +21,8 @@ import type {
   SessionBootstrapResponse,
   TradeHistoryPage,
   TradingPerformanceSummary,
+  TradingReport,
+  TradingReportQuery,
 } from '@excess/shared-types';
 
 export class ExcessApiError extends Error {
@@ -39,11 +41,11 @@ const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_URL ??
   'http://localhost:4000/api/v1';
 
-async function request<T>(
+async function requestResponse(
   path: string,
   token: string,
   init?: RequestInit,
-): Promise<T> {
+): Promise<Response> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     cache: 'no-store',
@@ -70,7 +72,15 @@ async function request<T>(
     );
   }
 
-  return response.json() as Promise<T>;
+  return response;
+}
+
+async function request<T>(
+  path: string,
+  token: string,
+  init?: RequestInit,
+): Promise<T> {
+  return (await requestResponse(path, token, init)).json() as Promise<T>;
 }
 
 export function bootstrapSession(token: string) {
@@ -143,6 +153,36 @@ export function getTradeHistory(
 
 export function getTradingPerformance(token: string) {
   return request<TradingPerformanceSummary>('/trading/performance', token);
+}
+
+function reportQuery(options: TradingReportQuery) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  return query;
+}
+
+export function getTradingReport(
+  token: string,
+  options: TradingReportQuery = {},
+) {
+  return request<TradingReport>(
+    `/reports/trading?${reportQuery(options)}`,
+    token,
+  );
+}
+
+export async function exportTradingReport(
+  token: string,
+  options: Omit<TradingReportQuery, 'cursor' | 'limit'>,
+) {
+  return (
+    await requestResponse(
+      `/reports/trading/export?${reportQuery(options)}`,
+      token,
+    )
+  ).blob();
 }
 
 export function cancelOrder(token: string, orderId: string) {
