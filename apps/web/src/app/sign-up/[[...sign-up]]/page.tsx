@@ -1,9 +1,13 @@
 import { SignUp } from '@clerk/nextjs';
+import type { Metadata } from 'next';
+import { AuthLoading, AuthShell } from '../../../components/auth-shell';
+
+export const metadata: Metadata = { title: 'Create account' };
 
 export default function SignUpPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center px-6 py-12">
-      <SignUp forceRedirectUrl="/dashboard" />
-    </div>
+    <AuthShell>
+      <SignUp forceRedirectUrl="/dashboard" fallback={<AuthLoading />} />
+    </AuthShell>
   );
 }
