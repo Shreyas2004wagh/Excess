@@ -1,6 +1,6 @@
 'use client';
 
-import { UserButton, useAuth } from '@clerk/nextjs';
+import { useAuth } from '@clerk/nextjs';
 import type {
   CandleHistoryResponse,
   Leverage,
@@ -45,6 +45,9 @@ import {
   placeOrder,
 } from '../../lib/excess-api';
 import { formatCurrency } from '../../lib/format';
+
+import { WorkspaceShell } from '../../components/workspace-shell';
+import { Icon } from '../../components/icon';
 
 const websocketUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000';
 
@@ -248,7 +251,7 @@ export function MarketTerminal({
         const nextChart = createChart(container, {
           autoSize: true,
           layout: {
-            background: { type: ColorType.Solid, color: '#0b0f14' },
+            background: { type: ColorType.Solid, color: '#101318' },
             textColor: '#82909f',
             attributionLogo: false,
           },
@@ -265,11 +268,11 @@ export function MarketTerminal({
           },
         });
         const nextSeries = nextChart.addSeries(CandlestickSeries, {
-          upColor: '#9dff5b',
-          downColor: '#ff647c',
+          upColor: '#b6ed72',
+          downColor: '#f38a9b',
           borderVisible: false,
-          wickUpColor: '#9dff5b',
-          wickDownColor: '#ff647c',
+          wickUpColor: '#b6ed72',
+          wickDownColor: '#f38a9b',
           priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
         });
         nextSeries.setData(candles.items.map(chartCandle));
@@ -627,49 +630,41 @@ export function MarketTerminal({
   }
 
   return (
-    <main className="min-h-screen bg-[#080b0f] px-3 py-3 text-[var(--foreground)] sm:px-5 sm:py-4">
-      <nav className="flex min-h-14 flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-3">
-        <div className="flex items-center gap-6">
-          <Link
-            className="font-mono text-base font-semibold tracking-[0.18em]"
-            href="/"
-          >
-            EXCESS
-          </Link>
-          <div className="hidden items-center gap-2 text-sm sm:flex">
-            <span
-              className={`font-mono text-xs ${statusTone(feedStatus)}`}
-              data-testid="feed-status"
-            >
-              ● {feedStatus}
-            </span>
-            <span className="text-[var(--muted)]">
-              {ticker.source === 'COINBASE' ? 'Coinbase' : 'Test feed'}
-            </span>
-          </div>
+    <WorkspaceShell
+      active="terminal"
+      admin={user.role === 'ADMIN'}
+      status={
+        <span
+          className={`font-mono text-[10px] ${statusTone(feedStatus)}`}
+          data-testid="feed-status"
+        >
+          ● {feedStatus}
+        </span>
+      }
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="eyebrow">MARKET WORKSPACE</p>
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            {ticker.source === 'COINBASE' ? 'Coinbase' : 'Test feed'} ·
+            Simulated execution · USD
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="hidden text-right text-xs sm:block">
-            <p className="text-[var(--muted)]">Demo balance</p>
-            <p className="mt-0.5 font-mono">
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <p className="text-[10px] text-[var(--muted)]">Demo balance</p>
+            <p className="mt-1 font-mono text-sm">
               {formatCurrency(
                 livePortfolio.account.balance,
                 livePortfolio.account.baseCurrency,
               )}
             </p>
           </div>
-          <Link className="button button-secondary" href="/dashboard">
-            Dashboard
-          </Link>
-          <Link className="button button-secondary" href="/reports">
-            Reports
-          </Link>
-          <Link className="button button-secondary" href="/notifications">
-            Notifications
-          </Link>
-          <UserButton />
+          <a className="button button-secondary" href="#order-ticket">
+            Trade <Icon name="arrow" size={14} />
+          </a>
         </div>
-      </nav>
+      </div>
 
       {streamError ? (
         <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-2 text-sm text-amber-200">
@@ -689,68 +684,57 @@ export function MarketTerminal({
         >
           {livePortfolio.riskState === 'LIQUIDATION'
             ? 'Liquidation threshold reached. The risk engine is closing the position.'
-            : 'Margin warning: margin level is at or below 100%. Reduce exposure or add funds.'}
+            : 'Margin warning: margin level is at or below 100%. Review your exposure and consider reducing the position.'}
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)_300px]">
-        <aside className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
-            Watchlist
-          </p>
-          <div className="mt-4 space-y-2">
-            {instruments.map((item) => {
-              const itemTicker = tickers[item.symbol] ?? item.ticker;
-              const itemPositive = Number(itemTicker.change24h) >= 0;
-              const selected = item.symbol === instrument.symbol;
-              return (
-                <button
-                  aria-pressed={selected}
-                  className={`w-full rounded-xl border p-4 text-left transition ${
-                    selected
-                      ? 'border-[var(--accent)]/30 bg-[var(--accent)]/5'
-                      : 'border-transparent bg-[#0b0f14] hover:border-[var(--border)]'
-                  }`}
-                  data-testid={`instrument-${item.symbol}`}
-                  key={item.symbol}
-                  onClick={() => selectInstrument(item.symbol)}
-                  type="button"
+      <div className="terminal-market-strip" aria-label="Market watchlist">
+        {instruments.map((item) => {
+          const itemTicker = tickers[item.symbol] ?? item.ticker;
+          const itemPositive = Number(itemTicker.change24h) >= 0;
+          const selected = item.symbol === instrument.symbol;
+          return (
+            <button
+              aria-pressed={selected}
+              className={`flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-left transition sm:p-4 ${selected ? 'border-[var(--accent)]/35 bg-[var(--accent)]/5' : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--muted)]'}`}
+              data-testid={`instrument-${item.symbol}`}
+              key={item.symbol}
+              onClick={() => selectInstrument(item.symbol)}
+              type="button"
+            >
+              <span className="flex items-center gap-3">
+                <span
+                  className={`asset-avatar ${item.baseCurrency === 'ETH' ? 'eth' : ''}`}
                 >
-                  <span className="flex items-start justify-between gap-2">
-                    <span>
-                      <span className="block font-semibold">
-                        {item.displayName.replace('/', ' / ')}
-                      </span>
-                      <span className="mt-1 block text-xs text-[var(--muted)]">
-                        {item.baseCurrency} · Demo CFD
-                      </span>
-                    </span>
-                    <span
-                      className={`font-mono text-xs ${itemPositive ? 'text-[var(--accent)]' : 'text-rose-300'}`}
-                    >
-                      {itemPositive ? '+' : ''}
-                      {decimal(itemTicker.change24h)}%
-                    </span>
+                  {item.baseCurrency === 'BTC' ? '₿' : 'Ξ'}
+                </span>
+                <span>
+                  <span className="block text-sm font-medium">
+                    {item.displayName.replace('/', ' / ')}
                   </span>
-                  <span className="mt-5 block font-mono text-lg">
-                    ${decimal(itemTicker.price)}
+                  <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                    {item.baseCurrency === 'BTC' ? 'Bitcoin' : 'Ethereum'} ·
+                    Demo CFD
                   </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-6 space-y-3 border-t border-[var(--border)] pt-5 text-xs">
-            <div className="flex justify-between">
-              <span className="text-[var(--muted)]">Tick size</span>
-              <span className="font-mono">{instrument.tickSize}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[var(--muted)]">Minimum size</span>
-              <span className="font-mono">{instrument.minimumQuantity}</span>
-            </div>
-          </div>
-        </aside>
-
+                </span>
+              </span>
+              <span>
+                <span className="block font-mono text-sm">
+                  ${decimal(itemTicker.price)}
+                </span>
+                <span
+                  className={`mt-1 block font-mono text-[10px] sm:text-right ${itemPositive ? 'text-[var(--accent)]' : 'text-rose-300'}`}
+                >
+                  {itemPositive ? '+' : ''}
+                  {decimal(itemTicker.change24h)}%{' '}
+                  <span className="text-[var(--muted)]">24h</span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="terminal-trade-grid">
         <section className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
           <header className="flex flex-wrap items-end justify-between gap-4 border-b border-[var(--border)] px-5 py-4">
             <div>
@@ -778,18 +762,16 @@ export function MarketTerminal({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {['1m', '5m', '15m', '1h'].map((timeframe) => (
-                <span
-                  className={`rounded-lg px-3 py-1.5 font-mono text-xs ${
-                    timeframe === '5m'
-                      ? 'bg-[var(--accent)] text-[#0b1207]'
-                      : 'text-[var(--muted)]'
-                  }`}
-                  key={timeframe}
-                >
-                  {timeframe}
-                </span>
-              ))}
+              <span className="demo-label">5m candles</span>
+              <button
+                className="button button-secondary !min-h-8 !px-2 !py-1 !text-[10px]"
+                onClick={() => chart.current?.timeScale().fitContent()}
+                type="button"
+                aria-label="Reset chart view"
+              >
+                <Icon name="refresh" size={14} />
+                Reset view
+              </button>
             </div>
           </header>
 
@@ -807,7 +789,12 @@ export function MarketTerminal({
             ))}
           </div>
 
-          <div className="h-[520px] w-full" ref={chartContainer} />
+          <div
+            className="terminal-chart"
+            ref={chartContainer}
+            role="img"
+            aria-label={`${instrument.symbol} live five-minute candlestick chart`}
+          />
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] px-5 py-3 text-[11px] text-[var(--muted)]">
             <span>
               {candles.items.length} five-minute candles · Volume{' '}
@@ -824,7 +811,7 @@ export function MarketTerminal({
           </div>
         </section>
 
-        <aside className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <aside className="terminal-ticket panel p-5" id="order-ticket">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">Order ticket</h2>
             <span className="rounded-full bg-white/5 px-2 py-1 font-mono text-[10px] text-[var(--muted)]">
@@ -832,7 +819,7 @@ export function MarketTerminal({
             </span>
           </div>
           <form onSubmit={submitOrder}>
-            <div className="mt-6 grid grid-cols-2 rounded-xl bg-[#0b0f14] p-1 text-center text-sm">
+            <div className="mt-6 grid grid-cols-2 rounded-xl bg-[#101318] p-1 text-center text-sm">
               {(['BUY', 'SELL'] as const).map((nextSide) => (
                 <button
                   aria-pressed={side === nextSide}
@@ -855,7 +842,7 @@ export function MarketTerminal({
               <legend className="text-xs text-[var(--muted)]">
                 Order type
               </legend>
-              <div className="mt-2 grid grid-cols-3 rounded-xl bg-[#0b0f14] p-1 text-xs">
+              <div className="mt-2 grid grid-cols-3 rounded-xl bg-[#101318] p-1 text-xs">
                 {(['MARKET', 'LIMIT', 'STOP'] as const).map((nextType) => (
                   <button
                     aria-pressed={orderType === nextType}
@@ -876,7 +863,7 @@ export function MarketTerminal({
             <label className="mt-4 block text-xs text-[var(--muted)]">
               Quantity ({instrument.baseCurrency})
               <input
-                className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+                className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#101318] px-4 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
                 inputMode="decimal"
                 min={instrument.minimumQuantity}
                 name="quantity"
@@ -889,7 +876,7 @@ export function MarketTerminal({
             </label>
             <fieldset className="mt-4">
               <legend className="text-xs text-[var(--muted)]">Leverage</legend>
-              <div className="mt-2 grid grid-cols-4 rounded-xl bg-[#0b0f14] p-1 text-xs">
+              <div className="mt-2 grid grid-cols-4 rounded-xl bg-[#101318] p-1 text-xs">
                 {([1, 2, 5, 10] as const).map((nextLeverage) => (
                   <button
                     aria-pressed={leverage === nextLeverage}
@@ -917,7 +904,7 @@ export function MarketTerminal({
               <label className="mt-4 block text-xs text-[var(--muted)]">
                 {orderType === 'LIMIT' ? 'Limit price' : 'Stop price'} (USD)
                 <input
-                  className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+                  className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#101318] px-4 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
                   inputMode="decimal"
                   min={instrument.tickSize}
                   name="orderPrice"
@@ -929,37 +916,40 @@ export function MarketTerminal({
                 />
               </label>
             ) : null}
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <label className="block text-xs text-[var(--muted)]">
-                Stop loss (USD)
-                <input
-                  className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-3 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
-                  inputMode="decimal"
-                  min={instrument.tickSize}
-                  name="stopLossPrice"
-                  onChange={(event) => setStopLossPrice(event.target.value)}
-                  placeholder="Optional"
-                  step={instrument.tickSize}
-                  type="number"
-                  value={stopLossPrice}
-                />
-              </label>
-              <label className="block text-xs text-[var(--muted)]">
-                Take profit (USD)
-                <input
-                  className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#0b0f14] px-3 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
-                  inputMode="decimal"
-                  min={instrument.tickSize}
-                  name="takeProfitPrice"
-                  onChange={(event) => setTakeProfitPrice(event.target.value)}
-                  placeholder="Optional"
-                  step={instrument.tickSize}
-                  type="number"
-                  value={takeProfitPrice}
-                />
-              </label>
-            </div>
-            <div className="mt-6 space-y-3 border-y border-[var(--border)] py-5 text-xs">
+            <details className="optional-protection">
+              <summary>Add stop loss / take profit</summary>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <label className="block text-xs text-[var(--muted)]">
+                  Stop loss (USD)
+                  <input
+                    className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#101318] px-3 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+                    inputMode="decimal"
+                    min={instrument.tickSize}
+                    name="stopLossPrice"
+                    onChange={(event) => setStopLossPrice(event.target.value)}
+                    placeholder="Optional"
+                    step={instrument.tickSize}
+                    type="number"
+                    value={stopLossPrice}
+                  />
+                </label>
+                <label className="block text-xs text-[var(--muted)]">
+                  Take profit (USD)
+                  <input
+                    className="mt-2 block w-full rounded-xl border border-[var(--border)] bg-[#101318] px-3 py-3 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+                    inputMode="decimal"
+                    min={instrument.tickSize}
+                    name="takeProfitPrice"
+                    onChange={(event) => setTakeProfitPrice(event.target.value)}
+                    placeholder="Optional"
+                    step={instrument.tickSize}
+                    type="number"
+                    value={takeProfitPrice}
+                  />
+                </label>
+              </div>
+            </details>
+            <div className="mt-5 space-y-3 text-xs">
               <div className="flex justify-between">
                 <span className="text-[var(--muted)]">Equity</span>
                 <span className="font-mono">
@@ -1005,6 +995,13 @@ export function MarketTerminal({
                 : `${side === 'BUY' ? 'Buy' : 'Sell'} ${instrument.baseCurrency} · ${orderType.toLowerCase()}`}
             </button>
           </form>
+          <p className="mt-3 text-[10px] leading-5 text-[var(--muted)]">
+            {feedStatus !== 'LIVE'
+              ? 'Orders are paused until a live quote is available.'
+              : !orderIsValid
+                ? 'Enter a valid quantity and the required order price to continue.'
+                : 'Virtual funds only. Market fills include simulated spread and slippage.'}
+          </p>
           {orderError ? (
             <p
               className="mt-4 rounded-xl border border-rose-300/20 bg-rose-300/5 px-3 py-2 text-xs leading-5 text-rose-200"
@@ -1048,7 +1045,16 @@ export function MarketTerminal({
         </aside>
       </div>
 
-      <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <nav className="terminal-section-nav" aria-label="Terminal sections">
+        <a href="#positions">Positions</a>
+        <a href="#open-orders">Open orders</a>
+        <a href="#price-alerts">Price alerts</a>
+        <a href="#trading-activity">Trading activity</a>
+        <Link href="/reports">
+          Full reports <Icon name="diagonal" size={12} />
+        </Link>
+      </nav>
+      <section id="positions" className="mt-3 panel p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
@@ -1069,7 +1075,7 @@ export function MarketTerminal({
             {livePortfolio.riskState.replace('_', ' ')}
           </span>
         </div>
-        <div className="mt-5 grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3 xl:grid-cols-6">
           {[
             [
               'Equity',
@@ -1139,7 +1145,7 @@ export function MarketTerminal({
           ))}
         </div>
         {openPosition ? (
-          <div className="mt-4 grid gap-4 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-3 xl:grid-cols-6">
+          <div className="mt-4 grid grid-cols-2 gap-4 break-words rounded-xl bg-[#101318] p-4 text-sm sm:grid-cols-3 xl:grid-cols-6">
             <div>
               <p className="text-xs text-[var(--muted)]">Instrument</p>
               <p className="mt-1 font-semibold">{openPosition.symbol}</p>
@@ -1186,14 +1192,17 @@ export function MarketTerminal({
             </div>
           </div>
         ) : (
-          <p className="mt-4 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
+          <p className="mt-4 rounded-xl bg-[#101318] px-4 py-5 text-sm text-[var(--muted)]">
             No open {instrument.symbol} position. Place a market order to start
             tracking live P/L.
           </p>
         )}
       </section>
 
-      <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <section
+        id="trading-activity"
+        className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5"
+      >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
@@ -1211,7 +1220,7 @@ export function MarketTerminal({
         </div>
 
         <div
-          className="mt-5 grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-6"
+          className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3 xl:grid-cols-6"
           data-testid="trading-performance"
         >
           {[
@@ -1266,10 +1275,16 @@ export function MarketTerminal({
         </div>
 
         {tradeHistory.items.length > 0 ? (
-          <div className="mt-5 space-y-2" data-testid="trade-history">
+          <div
+            className="mt-5 max-h-[440px] space-y-2 overflow-y-auto pr-1"
+            data-testid="trade-history"
+            role="region"
+            aria-label="Recent execution history"
+            tabIndex={0}
+          >
             {tradeHistory.items.map((trade) => (
               <div
-                className="grid items-center gap-3 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-[1.1fr_0.8fr_1.2fr_0.7fr_1fr]"
+                className="grid items-center gap-3 rounded-xl bg-[#101318] p-4 text-sm sm:grid-cols-[1.1fr_0.8fr_1.2fr_0.7fr_1fr]"
                 key={trade.id}
               >
                 <div>
@@ -1331,7 +1346,7 @@ export function MarketTerminal({
             ) : null}
           </div>
         ) : (
-          <p className="mt-5 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
+          <p className="mt-5 rounded-xl bg-[#101318] px-4 py-5 text-sm text-[var(--muted)]">
             No executions yet. Filled orders will appear here with their
             realized result.
           </p>
@@ -1343,7 +1358,10 @@ export function MarketTerminal({
         ) : null}
       </section>
 
-      <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <section
+        id="open-orders"
+        className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5"
+      >
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
@@ -1363,7 +1381,7 @@ export function MarketTerminal({
                 order.requestedPrice ?? order.stopPrice ?? '0';
               return (
                 <div
-                  className="grid items-center gap-3 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_auto]"
+                  className="grid items-center gap-3 rounded-xl bg-[#101318] p-4 text-sm sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_auto]"
                   key={order.id}
                 >
                   <div>
@@ -1404,14 +1422,17 @@ export function MarketTerminal({
             })}
           </div>
         ) : (
-          <p className="mt-5 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
+          <p className="mt-5 rounded-xl bg-[#101318] px-4 py-5 text-sm text-[var(--muted)]">
             No open orders. Limit, stop, and attached protection orders will
             appear here.
           </p>
         )}
       </section>
 
-      <section className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <section
+        id="price-alerts"
+        className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5"
+      >
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
@@ -1429,7 +1450,7 @@ export function MarketTerminal({
           >
             <fieldset>
               <legend className="sr-only">Alert direction</legend>
-              <div className="grid grid-cols-2 rounded-xl bg-[#0b0f14] p-1 text-xs">
+              <div className="grid grid-cols-2 rounded-xl bg-[#101318] p-1 text-xs">
                 {(['ABOVE', 'BELOW'] as const).map((direction) => (
                   <button
                     aria-pressed={alertDirection === direction}
@@ -1451,7 +1472,7 @@ export function MarketTerminal({
               Alert price (USD)
             </label>
             <input
-              className="rounded-xl border border-[var(--border)] bg-[#0b0f14] px-4 py-2.5 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
+              className="rounded-xl border border-[var(--border)] bg-[#101318] px-4 py-2.5 font-mono text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]/60"
               id="alert-price"
               inputMode="decimal"
               min={instrument.tickSize}
@@ -1482,7 +1503,7 @@ export function MarketTerminal({
           <div className="mt-5 space-y-2" data-testid="price-alerts">
             {visibleAlerts.map((alert) => (
               <div
-                className="grid items-center gap-3 rounded-xl bg-[#0b0f14] p-4 text-sm sm:grid-cols-[1.2fr_1fr_1fr_auto]"
+                className="grid items-center gap-3 rounded-xl bg-[#101318] p-4 text-sm sm:grid-cols-[1.2fr_1fr_1fr_auto]"
                 key={alert.id}
               >
                 <div>
@@ -1530,11 +1551,11 @@ export function MarketTerminal({
             ))}
           </div>
         ) : (
-          <p className="mt-5 rounded-xl bg-[#0b0f14] px-4 py-5 text-sm text-[var(--muted)]">
+          <p className="mt-5 rounded-xl bg-[#101318] px-4 py-5 text-sm text-[var(--muted)]">
             No active or triggered alerts yet.
           </p>
         )}
       </section>
-    </main>
+    </WorkspaceShell>
   );
 }
