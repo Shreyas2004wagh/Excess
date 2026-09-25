@@ -1,6 +1,4 @@
-import { UserButton } from '@clerk/nextjs';
 import { auth } from '@clerk/nextjs/server';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import {
@@ -8,6 +6,7 @@ import {
   ExcessApiError,
   getNotifications,
 } from '../../lib/excess-api';
+import { WorkspaceShell } from '../../components/workspace-shell';
 import { NotificationCenter } from './notification-center';
 
 export default async function NotificationsPage() {
@@ -17,40 +16,29 @@ export default async function NotificationsPage() {
   if (!token) redirect('/sign-in');
 
   try {
-    await bootstrapSession(token);
+    const bootstrap = await bootstrapSession(token);
     const notifications = await getNotifications(token);
     return (
-      <main className="mx-auto min-h-screen max-w-5xl px-6 py-8 sm:px-10">
-        <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border)] pb-6">
-          <Link
-            className="font-mono text-lg font-semibold tracking-[0.18em]"
-            href="/"
-          >
-            EXCESS
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link className="button button-secondary" href="/dashboard">
-              Dashboard
-            </Link>
-            <Link className="button button-primary" href="/terminal">
-              Terminal
-            </Link>
-            <UserButton />
+      <WorkspaceShell
+        active="notifications"
+        admin={bootstrap.user.role === 'ADMIN'}
+      >
+        <header className="page-heading">
+          <div>
+            <p className="font-mono text-xs uppercase tracking-[0.24em] text-[var(--accent)]">
+              Delivery center
+            </p>
+            <h1 className="mt-4 text-4xl font-semibold tracking-tight">
+              Market notifications
+            </h1>
+            <p className="mt-3 text-[var(--muted)]">
+              Your setups, followed through. Keep track of triggered price
+              alerts.
+            </p>
           </div>
-        </nav>
-        <header className="py-10">
-          <p className="font-mono text-xs uppercase tracking-[0.24em] text-[var(--accent)]">
-            Delivery center
-          </p>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight">
-            Market notifications
-          </h1>
-          <p className="mt-3 text-[var(--muted)]">
-            Durable in-app delivery for your triggered price alerts.
-          </p>
         </header>
         <NotificationCenter initialNotifications={notifications} />
-      </main>
+      </WorkspaceShell>
     );
   } catch (error) {
     if (error instanceof ExcessApiError && error.status === 401) {

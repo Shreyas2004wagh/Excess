@@ -3,6 +3,8 @@
 import { useAuth } from '@clerk/nextjs';
 import type { NotificationsResponse } from '@excess/shared-types';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { Icon } from '../../components/icon';
 
 import {
   getNotifications,
@@ -85,10 +87,7 @@ export function NotificationCenter({
   }
 
   return (
-    <section
-      className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]"
-      data-testid="notification-center"
-    >
+    <section className="panel" data-testid="notification-center">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border)] px-7 py-5">
         <div>
           <div className="flex items-center gap-3">
@@ -126,13 +125,27 @@ export function NotificationCenter({
 
       <div className="divide-y divide-[var(--border)]">
         {notifications.items.length === 0 ? (
-          <div className="px-7 py-10 text-center text-sm text-[var(--muted)]">
-            No notifications yet. Triggered price alerts will appear here.
+          <div className="px-7 py-14 text-center text-sm text-[var(--muted)]">
+            <span className="state-icon">
+              <Icon name="bell" size={26} />
+            </span>
+            <h3 className="mb-2 text-lg font-medium text-[var(--foreground)]">
+              A little peace of mind.
+            </h3>
+            <p>
+              No notifications yet. Triggered price alerts will appear here.
+            </p>
+            <Link
+              className="button button-secondary mt-6"
+              href="/terminal#price-alerts"
+            >
+              Create a price alert <Icon name="arrow" size={15} />
+            </Link>
           </div>
         ) : (
           notifications.items.map((notification) => (
             <article
-              className={`px-7 py-5 ${notification.readAt ? '' : 'bg-[rgb(157_255_91_/_4%)]'}`}
+              className={`px-7 py-5 ${notification.readAt ? '' : 'bg-[var(--accent)]/5'}`}
               key={notification.id}
             >
               <div className="flex flex-wrap items-start justify-between gap-4">

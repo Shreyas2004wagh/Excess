@@ -1,4 +1,3 @@
-import { UserButton } from '@clerk/nextjs';
 import { auth } from '@clerk/nextjs/server';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
@@ -8,6 +7,7 @@ import {
   ExcessApiError,
   getAdminOverview,
 } from '../../lib/excess-api';
+import { WorkspaceShell } from '../../components/workspace-shell';
 import { AdminConsole } from './admin-console';
 
 function AccessDenied() {
@@ -42,40 +42,22 @@ export default async function AdminPage() {
     if (bootstrap.user.role !== 'ADMIN') return <AccessDenied />;
     const overview = await getAdminOverview(token);
     return (
-      <main className="mx-auto min-h-screen max-w-7xl px-6 py-8 sm:px-10">
-        <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border)] pb-6">
-          <Link
-            className="font-mono text-lg font-semibold tracking-[0.18em]"
-            href="/"
-          >
-            EXCESS
-          </Link>
-          <div className="flex items-center gap-3">
-            <span className="rounded-full bg-[rgb(157_255_91_/_12%)] px-3 py-1 font-mono text-xs text-[var(--accent)]">
-              ADMIN
-            </span>
-            <Link className="button button-secondary" href="/notifications">
-              Notifications
-            </Link>
-            <Link className="button button-primary" href="/terminal">
-              Terminal
-            </Link>
-            <UserButton />
+      <WorkspaceShell active="admin" admin>
+        <header className="page-heading">
+          <div>
+            <p className="font-mono text-xs uppercase tracking-[0.24em] text-[var(--accent)]">
+              Operations
+            </p>
+            <h1 className="mt-4 text-4xl font-semibold tracking-tight">
+              Administration console
+            </h1>
+            <p className="mt-3 text-[var(--muted)]">
+              Account activity and the alert-delivery pipeline in one view.
+            </p>
           </div>
-        </nav>
-        <header className="py-10">
-          <p className="font-mono text-xs uppercase tracking-[0.24em] text-[var(--accent)]">
-            Operations
-          </p>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight">
-            Administration console
-          </h1>
-          <p className="mt-3 text-[var(--muted)]">
-            Account activity and the alert-delivery pipeline in one view.
-          </p>
         </header>
         <AdminConsole initialOverview={overview} />
-      </main>
+      </WorkspaceShell>
     );
   } catch (error) {
     if (error instanceof ExcessApiError && error.status === 401) {
