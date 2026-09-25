@@ -14,6 +14,8 @@ import {
   getTradingReport,
 } from '../../lib/excess-api';
 import { formatCurrency } from '../../lib/format';
+import { Icon } from '../../components/icon';
+import { RealizedChart } from '../../components/realized-chart';
 
 const money = (value: string) => formatCurrency(value, 'USD');
 const pnlTone = (value: string) =>
@@ -131,11 +133,9 @@ export function TradingReports({
   }
 
   return (
-    <section className="py-10">
-      <p className="font-mono text-xs uppercase tracking-[0.24em] text-[var(--accent)]">
-        Demo account · USD
-      </p>
-      <div className="mt-3 flex flex-wrap items-end justify-between gap-5">
+    <section>
+      <p className="eyebrow">THE NUMBERS BEHIND YOUR DECISIONS</p>
+      <div className="page-heading !pb-0">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">
             Trading reports
@@ -151,6 +151,7 @@ export function TradingReports({
           onClick={download}
           type="button"
         >
+          <Icon name="download" size={16} />
           {busy === 'export' ? 'Preparing CSV…' : 'Export CSV'}
         </button>
       </div>
@@ -238,7 +239,7 @@ export function TradingReports({
         {report.filters.asOf.replace('T', ' ').replace('Z', ' UTC')}
       </p>
       <div
-        className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4"
         data-testid="report-summary"
         aria-busy={busy === 'filter'}
       >
@@ -248,7 +249,7 @@ export function TradingReports({
           ['Recorded fees', money(report.summary.fees)],
           ['Credited realized P/L', money(report.summary.creditedRealizedPnl)],
         ].map(([label, value]) => (
-          <article className={`${panelClass} p-5`} key={label}>
+          <article className="panel metric-card" key={label}>
             <h2 className="text-sm text-[var(--muted)]">{label}</h2>
             <p
               className={`mt-3 break-words font-mono text-2xl ${label === 'Credited realized P/L' ? pnlTone(report.summary.creditedRealizedPnl) : ''}`}
@@ -258,6 +259,7 @@ export function TradingReports({
           </article>
         ))}
       </div>
+      <RealizedChart days={report.days} />
       <p className="mt-4 max-w-4xl text-xs leading-6 text-[var(--muted)]">
         Realized P/L uses the amounts applied to your ledger, including
         negative-balance protection. It excludes unrealized P/L, the opening
@@ -399,6 +401,9 @@ export function TradingReports({
             No executions match these filters. Try another period or instrument.
           </p>
         )}
+        <p className="table-scroll-hint sm:hidden">
+          Swipe the table sideways to see all execution details.
+        </p>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--border)] px-5 py-4">
           <p className="text-xs text-[var(--muted)]">
             — means no realized ledger entry was recorded for that execution.

@@ -1,4 +1,3 @@
-import { UserButton } from '@clerk/nextjs';
 import { auth } from '@clerk/nextjs/server';
 import {
   MARKET_SYMBOLS,
@@ -13,6 +12,7 @@ import {
   ExcessApiError,
   getTradingReport,
 } from '../../lib/excess-api';
+import { WorkspaceShell } from '../../components/workspace-shell';
 import { TradingReports } from './trading-reports';
 
 export default async function ReportsPage({
@@ -47,32 +47,12 @@ export default async function ReportsPage({
         else query[field] = value;
       }
     }
-    await bootstrapSession(token);
+    const bootstrap = await bootstrapSession(token);
     const report = await getTradingReport(token, query);
     return (
-      <main className="mx-auto min-h-screen max-w-7xl px-4 py-8 sm:px-8">
-        <nav
-          aria-label="Main navigation"
-          className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border)] pb-6"
-        >
-          <Link
-            className="font-mono text-lg font-semibold tracking-[0.18em]"
-            href="/"
-          >
-            EXCESS
-          </Link>
-          <div className="flex flex-wrap items-center gap-3">
-            <Link className="button button-secondary" href="/dashboard">
-              Dashboard
-            </Link>
-            <Link className="button button-secondary" href="/terminal">
-              Terminal
-            </Link>
-            <UserButton />
-          </div>
-        </nav>
+      <WorkspaceShell active="reports" admin={bootstrap.user.role === 'ADMIN'}>
         <TradingReports key={report.filters.asOf} initialReport={report} />
-      </main>
+      </WorkspaceShell>
     );
   } catch (error) {
     if (error instanceof ExcessApiError && error.status === 401)
