@@ -149,6 +149,20 @@ cannot read or export reports.
 
 ## Quality checks
 
+The web workspace uses a shared graphite-and-lime design system, self-hosted Geist
+fonts, persistent desktop navigation, and a compact mobile tab bar. The public
+landing-page chart is explicitly illustrative; authenticated dashboard quotes and
+portfolio metrics are page-load snapshots, while the terminal streams live updates.
+The reports chart visualizes cumulative credited realized P/L for the selected
+period, starting at zero; it is not an equity curve.
+
+Frontend checks cover keyboard skip links, active navigation, reduced motion,
+mobile/tablet/desktop overflow, chart reset, protective-order controls, loaded
+Clerk sign-up fields, and signed ledger amounts. Playwright also exercises existing
+trading, alert, report/export, and administrative flows. Its authenticated fixtures
+share one test account, so the suite runs with one worker. Screenshot artifacts are
+written to `apps/web/test-results/` for visual inspection, not committed baselines.
+
 ```bash
 corepack pnpm lint
 corepack pnpm typecheck
@@ -197,6 +211,8 @@ to the final Vercel or custom-domain origin.
 12. Multi-instrument market data, trading, portfolio risk, and alerts — complete for BTC-USD and ETH-USD
 13. Paginated trade history and account performance analytics — complete
 14. Date-filtered trading reports, daily results, and CSV export — complete
+15. Responsive frontend redesign: landing, authentication, shared workspace,
+    account overview, trading terminal, and realized-performance chart — complete
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.

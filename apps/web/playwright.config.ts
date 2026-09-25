@@ -4,6 +4,8 @@ export default defineConfig({
   testDir: './e2e',
   globalTeardown: './e2e/global.teardown.ts',
   fullyParallel: false,
+  // Authenticated fixtures share the same Clerk user and demo account.
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',

@@ -151,6 +151,10 @@ test('filters, paginates, refreshes, and exports an authenticated trading report
     await expect(
       page.getByTestId('report-trades').locator('tbody tr'),
     ).toHaveCount(26);
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement)?.blur();
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    });
     await page.screenshot({
       path: testInfo.outputPath('reports-desktop.png'),
       fullPage: true,
@@ -258,7 +262,11 @@ test('provisions one demo account and keeps it after refresh', async ({
 
   await expect(page.getByText('$10,000.00', { exact: true })).toBeVisible();
   await expect(page.getByText('Opening demo credit')).toHaveCount(1);
-  await expect(page.getByText('BTC and ETH markets are live.')).toBeVisible();
+  await expect(
+    page.getByText('Follow BTC and ETH in the terminal.', {
+      exact: false,
+    }),
+  ).toBeVisible();
 
   await page.reload();
   await expect(page.getByText('$10,000.00', { exact: true })).toBeVisible();
@@ -285,7 +293,9 @@ test('renders and switches the authenticated multi-market terminal', async ({
   await expect(
     page.getByRole('heading', { name: 'BTC / USD', exact: true }),
   ).toBeVisible();
-  await expect(page.getByText('Test feed', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Test feed · Simulated execution · USD', { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText('● LIVE', { exact: true })).toBeVisible();
   await expect(page.getByText('Charts by TradingView')).toBeVisible();
   await expect(page.locator('canvas').first()).toBeVisible();
