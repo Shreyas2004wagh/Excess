@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { jest } from '@jest/globals';
 
@@ -9,6 +9,7 @@ import { DatabaseService } from '../database/database.service.js';
 import { SessionService } from '../session/session.service.js';
 import type { HealthService } from '../health/health.service.js';
 import { AdminService } from './admin.service.js';
+import { parseAuditQuery } from './audit-query.js';
 
 const administratorClerkId = `user_admin_${randomUUID()}`;
 const traderClerkId = `user_trader_${randomUUID()}`;
@@ -164,5 +165,163 @@ describe('Administration', () => {
         },
       }),
     ).toBe(1);
+  });
+
+  it('paginates equal timestamps without omissions and projects exact metadata', async () => {
+    const administrator = await database.client.user.findUniqueOrThrow({
+      where: { clerkId: administratorClerkId },
+    });
+    const resourceId = randomUUID();
+    const fixtureIds = Array.from({ length: 5 }, () => randomUUID())
+      .sort()
+      .reverse();
+    await database.client.auditEvent.createMany({
+      data: fixtureIds.map((id) => ({
+        id,
+        actorUserId: administrator.id,
+        action: 'ORDER_FILLED',
+        resourceType: 'ORDER',
+        resourceId,
+        createdAt: new Date('2024-06-02T12:00:00Z'),
+        metadata: {
+          quantity: '0.0000000001',
+          fillPrice: '100.1234567891',
+          token: 'never-export',
+        },
+        ipAddress: '127.0.0.1',
+      })),
+    });
+    const query = {
+      from: '2024-06-01',
+      to: '2024-06-03',
+      actorUserId: administrator.id,
+      resourceId,
+      limit: '2',
+    };
+    const first = await admin.getAuditEvents(
+      administratorIdentity,
+      parseAuditQuery(query),
+    );
+    const second = await admin.getAuditEvents(
+      administratorIdentity,
+      parseAuditQuery({
+        ...query,
+        asOf: first.filters.asOf,
+        cursor: first.nextCursor!,
+      }),
+    );
+    const third = await admin.getAuditEvents(
+      administratorIdentity,
+      parseAuditQuery({
+        ...query,
+        asOf: first.filters.asOf,
+        cursor: second.nextCursor!,
+      }),
+    );
+    expect(
+      [...first.items, ...second.items, ...third.items].map(
+        (event) => event.id,
+      ),
+    ).toEqual(fixtureIds);
+    expect(third.nextCursor).toBeNull();
+    expect(first.items[0]).toMatchObject({
+      actorUserId: administrator.id,
+      actorEmail: 'administrator@example.com',
+      metadata: { quantity: '0.0000000001', fillPrice: '100.1234567891' },
+    });
+    expect(first.items[0]).not.toHaveProperty('ipAddress');
+    expect(JSON.stringify(first)).not.toContain('never-export');
+    const filtered = await admin.getAuditEvents(
+      administratorIdentity,
+      parseAuditQuery({ ...query, action: 'ORDER_CANCELLED' }),
+    );
+    expect(filtered.items).toEqual([]);
+    await expect(
+      admin.getAuditEvents(
+        administratorIdentity,
+        parseAuditQuery({
+          ...query,
+          action: 'ORDER_CANCELLED',
+          cursor: first.nextCursor!,
+          asOf: first.filters.asOf,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('honors the original cutoff and supports events without an associated user', async () => {
+    const resourceId = randomUUID();
+    const before = randomUUID(),
+      after = randomUUID();
+    const cutoff = new Date(Date.now() - 10_000);
+    try {
+      await database.client.auditEvent.createMany({
+        data: [
+          {
+            id: before,
+            action: 'SYSTEM_TEST',
+            resourceType: 'ACCOUNT',
+            resourceId,
+            createdAt: new Date(cutoff.getTime() - 1000),
+          },
+          {
+            id: after,
+            action: 'SYSTEM_TEST',
+            resourceType: 'ACCOUNT',
+            resourceId,
+            createdAt: new Date(cutoff.getTime() + 1000),
+          },
+        ],
+      });
+      const page = await admin.getAuditEvents(
+        administratorIdentity,
+        parseAuditQuery({
+          resourceType: 'ACCOUNT',
+          resourceId,
+          asOf: cutoff.toISOString(),
+        }),
+      );
+      expect(page.items.map((event) => event.id)).toEqual([before]);
+      expect(page.items[0]).toMatchObject({
+        actorUserId: null,
+        actorEmail: null,
+        metadata: null,
+      });
+    } finally {
+      await database.client.auditEvent.deleteMany({
+        where: { id: { in: [before, after] } },
+      });
+    }
+  });
+
+  it('rejects ordinary, suspended, and deleted administrators from the audit API', async () => {
+    const query = parseAuditQuery({});
+    await expect(
+      admin.getAuditEvents(traderIdentity, query),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    const user = await database.client.user.findUniqueOrThrow({
+      where: { clerkId: administratorClerkId },
+    });
+    try {
+      await database.client.user.update({
+        where: { id: user.id },
+        data: { status: 'SUSPENDED' },
+      });
+      await expect(
+        admin.getAuditEvents(administratorIdentity, query),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await database.client.user.update({
+        where: { id: user.id },
+        data: { status: 'ACTIVE', identityDeletedAt: new Date() },
+      });
+      await expect(
+        admin.getAuditEvents(administratorIdentity, query),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    } finally {
+      await database.client.user.update({
+        where: { id: user.id },
+        data: { status: 'ACTIVE', identityDeletedAt: null },
+      });
+    }
   });
 });

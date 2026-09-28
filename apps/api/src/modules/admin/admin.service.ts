@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -6,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { UserRole, UserStatus, type Prisma } from '@excess/database';
 import type {
+  AdminAuditPage,
   AdminDeliverySummary,
   AdminOverviewResponse,
 } from '@excess/shared-types';
@@ -13,6 +15,8 @@ import type {
 import type { ClerkIdentity } from '../auth/auth.types.js';
 import { DatabaseService } from '../database/database.service.js';
 import { HealthService } from '../health/health.service.js';
+import type { AuditQuery } from './audit-query.js';
+import { auditMetadata } from './audit-metadata.js';
 
 type DeliveryWithNotification = Prisma.OutboxEventGetPayload<{
   include: { notification: true };
@@ -218,13 +222,85 @@ export class AdminService {
     return serializeDelivery(retried);
   }
 
-  private async requireAdministrator(identity: ClerkIdentity) {
-    const user = await this.database.client.user.findUnique({
+  async getAuditEvents(
+    identity: ClerkIdentity,
+    query: AuditQuery,
+  ): Promise<AdminAuditPage> {
+    return this.database.client.$transaction(
+      async (tx) => {
+        await this.requireAdministrator(identity, tx);
+        const where: Prisma.AuditEventWhereInput = {
+          createdAt: {
+            gte: query.start,
+            lt: query.endExclusive,
+            lte: query.cutoff,
+          },
+          ...(query.filters.action ? { action: query.filters.action } : {}),
+          ...(query.filters.actorUserId
+            ? { actorUserId: query.filters.actorUserId }
+            : {}),
+          ...(query.filters.resourceType
+            ? { resourceType: query.filters.resourceType }
+            : {}),
+          ...(query.filters.resourceId
+            ? { resourceId: query.filters.resourceId }
+            : {}),
+        };
+        let boundary: Prisma.AuditEventWhereInput = {};
+        if (query.cursor) {
+          const cursor = await tx.auditEvent.findFirst({
+            where: { ...where, id: query.cursor },
+            select: { id: true, createdAt: true },
+          });
+          if (!cursor)
+            throw new BadRequestException({
+              code: 'INVALID_AUDIT_CURSOR',
+              message: 'The cursor does not belong to these audit filters.',
+            });
+          boundary = {
+            OR: [
+              { createdAt: { lt: cursor.createdAt } },
+              { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+            ],
+          };
+        }
+        const events = await tx.auditEvent.findMany({
+          where: { AND: [where, boundary] },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: query.limit + 1,
+          include: { actor: { select: { email: true } } },
+        });
+        const page = events.slice(0, query.limit);
+        return {
+          filters: query.filters,
+          nextCursor: events.length > query.limit ? page.at(-1)!.id : null,
+          items: page.map((event) => ({
+            id: event.id,
+            action: event.action,
+            actorUserId: event.actorUserId,
+            actorEmail: event.actor?.email ?? null,
+            resourceType: event.resourceType,
+            resourceId: event.resourceId,
+            createdAt: event.createdAt.toISOString(),
+            metadata: auditMetadata(event.metadata),
+          })),
+        };
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
+  }
+
+  private async requireAdministrator(
+    identity: ClerkIdentity,
+    client: Prisma.TransactionClient = this.database.client,
+  ) {
+    const user = await client.user.findUnique({
       where: { clerkId: identity.clerkUserId },
     });
     if (
       !user ||
       user.status !== UserStatus.ACTIVE ||
+      user.identityDeletedAt ||
       user.role !== UserRole.ADMIN
     ) {
       throw new ForbiddenException({
