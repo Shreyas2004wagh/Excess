@@ -35,6 +35,8 @@ export default async function globalTeardown() {
           in: [
             'MARKET_ORDER_FILLED',
             'ORDER_FILLED',
+            'ORDER_ACCEPTED',
+            'ORDER_CANCELLED',
             'NEGATIVE_BALANCE_PROTECTED',
             'PRICE_ALERT_TRIGGERED',
             'IN_APP_NOTIFICATION_DELIVERED',
