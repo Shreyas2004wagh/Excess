@@ -2,6 +2,8 @@ import type {
   CandleHistoryResponse,
   AdminDeliverySummary,
   AdminOverviewResponse,
+  AdminAuditPage,
+  AdminAuditQuery,
   CreatePriceAlertRequest,
   LedgerPage,
   MarketOrderRequest,
@@ -231,6 +233,17 @@ export function markAllNotificationsRead(token: string) {
 
 export function getAdminOverview(token: string) {
   return request<AdminOverviewResponse>('/admin/overview', token);
+}
+
+export function getAdminAuditEvents(
+  token: string,
+  options: AdminAuditQuery = {},
+) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined && value !== '') query.set(key, String(value));
+  }
+  return request<AdminAuditPage>(`/admin/audit-events?${query}`, token);
 }
 
 export function retryAdminDelivery(token: string, eventId: string) {

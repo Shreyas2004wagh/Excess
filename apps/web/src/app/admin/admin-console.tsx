@@ -3,6 +3,7 @@
 import { useAuth } from '@clerk/nextjs';
 import type { AdminOverviewResponse } from '@excess/shared-types';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 import { getAdminOverview, retryAdminDelivery } from '../../lib/excess-api';
 import { formatDate } from '../../lib/format';
@@ -219,8 +220,11 @@ export function AdminConsole({
       </section>
 
       <section className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
-        <header className="border-b border-[var(--border)] px-6 py-5">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
           <h2 className="font-semibold">Recent audit activity</h2>
+          <Link className="button button-secondary" href="/admin/audit">
+            Open audit explorer
+          </Link>
           <p className="mt-1 text-sm text-[var(--muted)]">
             Security, trading, risk, and delivery events retained by the API.
           </p>
