@@ -321,6 +321,37 @@ export interface AdminAuditSummary {
   createdAt: string;
 }
 
+export interface AdminAuditEntry extends AdminAuditSummary {
+  actorUserId: string | null;
+  metadata: Record<string, string | number | boolean | null> | null;
+}
+
+export interface AdminAuditQuery {
+  from?: string;
+  to?: string;
+  action?: string;
+  actorUserId?: string;
+  resourceType?: string;
+  resourceId?: string;
+  asOf?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface AdminAuditPage {
+  items: AdminAuditEntry[];
+  nextCursor: string | null;
+  filters: {
+    from: string;
+    to: string;
+    action: string | null;
+    actorUserId: string | null;
+    resourceType: string | null;
+    resourceId: string | null;
+    asOf: string;
+  };
+}
+
 export interface AdminOverviewResponse {
   system: ReadinessResponse;
   totals: {

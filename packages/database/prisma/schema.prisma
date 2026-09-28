@@ -318,4 +318,6 @@ model AuditEvent {
 
   @@index([actorUserId, createdAt])
   @@index([resourceType, resourceId])
+  @@index([createdAt, id])
+  @@index([action, createdAt, id])
 }
