@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { jest } from '@jest/globals';
 import type { MarketTicker } from '@excess/shared-types';
+import type { Prisma } from '@excess/database';
 
 import type { ClerkGateway } from '../auth/auth.types.js';
 import { DatabaseService } from '../database/database.service.js';
@@ -413,14 +414,26 @@ describe('Milestone 4 pending and protective orders', () => {
   });
 
   it('accepts and cancels a resting limit order', async () => {
-    const placed = await trading.placeOrder(pendingIdentity, {
+    const request = {
       clientOrderId: randomUUID(),
-      symbol: 'BTC-USD',
-      side: 'BUY',
-      type: 'LIMIT',
+      symbol: 'BTC-USD' as const,
+      side: 'BUY' as const,
+      type: 'LIMIT' as const,
       quantity: '0.05',
       limitPrice: '64000',
-    });
+    };
+    const receipts = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        trading.placeOrder(pendingIdentity, request),
+      ),
+    );
+    const placed = receipts[0]!;
+    expect(new Set(receipts.map((receipt) => receipt.order.id)).size).toBe(1);
+    expect(
+      await database.client.auditEvent.count({
+        where: { resourceId: placed.order.id, action: 'ORDER_ACCEPTED' },
+      }),
+    ).toBe(1);
 
     expect(placed).toMatchObject({
       order: {
@@ -434,14 +447,82 @@ describe('Milestone 4 pending and protective orders', () => {
       1,
     );
 
-    const cancelled = await trading.cancelOrder(
-      pendingIdentity,
-      placed.order.id,
+    const cancellations = await Promise.allSettled(
+      Array.from({ length: 2 }, () =>
+        trading.cancelOrder(pendingIdentity, placed.order.id),
+      ),
     );
-    expect(cancelled.status).toBe('CANCELLED');
+    expect(
+      cancellations.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(
+      cancellations.filter((result) => result.status === 'rejected'),
+    ).toHaveLength(1);
+    expect(
+      await database.client.auditEvent.count({
+        where: { resourceId: placed.order.id, action: 'ORDER_CANCELLED' },
+      }),
+    ).toBe(1);
     expect((await trading.getOpenOrders(pendingIdentity)).items).toHaveLength(
       0,
     );
+  });
+
+  it('rolls back an order cancellation if its audit write fails', async () => {
+    const placed = await trading.placeOrder(pendingIdentity, {
+      clientOrderId: randomUUID(),
+      symbol: 'BTC-USD',
+      side: 'BUY',
+      type: 'LIMIT',
+      quantity: '0.01',
+      limitPrice: '64000',
+    });
+    const transaction = database.client.$transaction.bind(database.client);
+    const mock = jest
+      .spyOn(database.client, '$transaction')
+      .mockImplementation(((
+        operation: (tx: Prisma.TransactionClient) => Promise<unknown>,
+        options?: {
+          isolationLevel?: Prisma.TransactionIsolationLevel;
+          maxWait?: number;
+          timeout?: number;
+        },
+      ) =>
+        transaction(async (tx) => {
+          const proxy = new Proxy(tx, {
+            get(target, key) {
+              if (key === 'auditEvent')
+                return {
+                  ...target.auditEvent,
+                  create: async () => {
+                    throw new Error('Audit storage unavailable');
+                  },
+                };
+              return Reflect.get(target, key);
+            },
+          });
+          return operation(proxy);
+        }, options)) as typeof database.client.$transaction);
+    try {
+      await expect(
+        trading.cancelOrder(pendingIdentity, placed.order.id),
+      ).rejects.toThrow('Audit storage unavailable');
+    } finally {
+      mock.mockRestore();
+    }
+    expect(
+      (
+        await database.client.order.findUniqueOrThrow({
+          where: { id: placed.order.id },
+        })
+      ).status,
+    ).toBe('ACCEPTED');
+    expect(
+      await database.client.auditEvent.count({
+        where: { resourceId: placed.order.id, action: 'ORDER_CANCELLED' },
+      }),
+    ).toBe(0);
+    await trading.cancelOrder(pendingIdentity, placed.order.id);
   });
 
   it('fills a buy stop once the live ask crosses its trigger', async () => {

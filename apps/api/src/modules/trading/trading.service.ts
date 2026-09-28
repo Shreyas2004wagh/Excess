@@ -316,6 +316,25 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
           });
         if (shouldFill) {
           await this.fillOrder(transaction, context, order, ticker);
+        } else {
+          await transaction.auditEvent.create({
+            data: {
+              actorUserId: context.user.id,
+              action: 'ORDER_ACCEPTED',
+              resourceType: 'ORDER',
+              resourceId: order.id,
+              metadata: {
+                accountId: context.account.id,
+                symbol: context.instrument.symbol,
+                type: order.type,
+                side: order.side,
+                quantity: order.quantity.toString(),
+                leverage: order.leverage.toString(),
+                requestedPrice: order.requestedPrice?.toString() ?? null,
+                stopPrice: order.stopPrice?.toString() ?? null,
+              },
+            },
+          });
         }
         return order.id;
       },
@@ -520,11 +539,26 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
           message: 'Only accepted orders can be cancelled',
         });
       }
-      return transaction.order.update({
+      const cancelled = await transaction.order.update({
         where: { id: existing.id },
         data: { status: 'CANCELLED' },
         include: { instrument: true },
       });
+      await transaction.auditEvent.create({
+        data: {
+          actorUserId: user.id,
+          action: 'ORDER_CANCELLED',
+          resourceType: 'ORDER',
+          resourceId: existing.id,
+          metadata: {
+            accountId: account.id,
+            symbol: existing.instrument.symbol,
+            purpose: existing.purpose,
+            reason: 'USER_REQUEST',
+          },
+        },
+      });
+      return cancelled;
     });
     return serializeOrder(order);
   }
