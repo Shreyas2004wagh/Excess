@@ -104,6 +104,34 @@ grant the persisted `ADMIN` role during session bootstrap. Administrators can op
 `/admin` to inspect account activity and delivery health or requeue a failed event;
 ordinary traders receive a stable `403` from the administration API.
 
+Administrators can open `/admin/audit` for a searchable audit explorer, linked
+from the operations page. Filter by inclusive UTC dates, action, associated user
+UUID, resource type, or exact resource ID. Expand an event to inspect its identifiers
+and recorded details, with financial decimal strings preserved. The explorer
+defaults to the last 30 days and supports ranges up to 366 days.
+
+`GET /api/v1/admin/audit-events` accepts `from`, `to`, `action`, `actorUserId`,
+`resourceType`, `resourceId`, `limit=1..100` (default 20), `cursor`, and `asOf`.
+Actions and resource types use uppercase identifiers such as `ORDER_FILLED` and
+`ORDER`. Results sort newest first by creation time and event ID. Follow-up pages
+must reuse the returned filters and `asOf` cutoff. Refreshing the explorer requests
+a new cutoff. As with reports, this is a timestamp boundary, not a durable database
+snapshot; a transaction committing late with an earlier timestamp can appear later.
+Invalid filters return `INVALID_AUDIT_QUERY`; cursors outside the selected filters
+return `INVALID_AUDIT_CURSOR`. The endpoint is private and uncached, and rejects
+ordinary, suspended, or deleted administrator identities.
+
+New resting-order acceptance and manual cancellation events are recorded in the
+same serializable transactions as their order changes. Concurrent duplicate
+submissions do not duplicate acceptance events, and an audit-write failure rolls
+back cancellation. Existing fill, negative-balance protection, alert, and delivery
+events remain available. Earlier acceptance/cancellation actions are not backfilled,
+and automatic protection/OCO cancellations do not gain separate events in this
+milestone. Associated users identify the account involved; an automatic fill or
+risk action may retain the account owner. API details project documented flat event
+fields; arbitrary stored metadata and IP addresses are not returned. Deploy the
+`20260928120000_audit_explorer` migration to add the audit search indexes.
+
 Authenticated API traffic is protected by a Redis-backed fixed-window rate limit,
 with a per-process in-memory fallback when Redis cannot be reached. Configure the
 quota with `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_SECONDS`. Every HTTP response
@@ -136,6 +164,7 @@ The authenticated trading interface is:
 - `PATCH /api/v1/notifications/:notificationId/read` — mark one notification read
 - `POST /api/v1/notifications/read-all` — mark every notification read
 - `GET /api/v1/admin/overview` — load administrator operations metrics
+- `GET /api/v1/admin/audit-events` — filter and paginate administrator audit activity
 - `POST /api/v1/admin/deliveries/:eventId/retry` — requeue a failed delivery
 
 Report queries accept `from=YYYY-MM-DD`, `to=YYYY-MM-DD`, optional
@@ -213,6 +242,7 @@ to the final Vercel or custom-domain origin.
 14. Date-filtered trading reports, daily results, and CSV export — complete
 15. Responsive frontend redesign: landing, authentication, shared workspace,
     account overview, trading terminal, and realized-performance chart — complete
+16. Administrator audit explorer and transactional pending-order audit events — complete
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.
