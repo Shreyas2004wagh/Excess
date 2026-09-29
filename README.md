@@ -62,6 +62,33 @@ gap loss from making the demo balance negative. Set
 `MARKET_DATA_PROVIDER=mock` for deterministic development or end-to-end tests
 without an external feed.
 
+Use **Close position** in the terminal's position panel to review and confirm a
+full reduce-only market exit. Long positions sell at the live bid; shorts buy at
+the live ask. The preview P/L is an estimate, not a guaranteed execution price.
+The server derives side, quantity, and leverage from the stored position; it
+does not trust a browser-entered closing size. Stop-loss and take-profit orders
+are cancelled atomically with the close. Pending entry orders remain active and
+can reopen exposure; the confirmation calls this out explicitly.
+Reopening a flat position uses the newly selected leverage rather than the
+closed position's reset leverage.
+
+`POST /api/v1/trading/positions/:positionId/close` accepts only a UUID
+`clientOrderId` and integer `expectedVersion`, taken from the position's portfolio
+summary. Every fill advances the position version. Changes during review return
+`POSITION_CHANGED` (409), and an already-flat position returns `POSITION_NOT_OPEN`
+(409). Review the updated position before submitting another close. A repeated
+request key returns the original execution, even if the same position has since
+reopened, without touching the new exposure. Reusing an entry order's key or a
+different position's closing key returns `IDEMPOTENCY_KEY_REUSED` (409).
+
+The browser retains the same request key when retrying a network or server failure
+within the current confirmation. It immediately applies a confirmed portfolio
+response and refreshes order history and performance. Closing uses the existing
+serializable execution, ledger, audit, outbox, and negative-balance protection
+logic. Close executions are labelled `POSITION_CLOSE` in history and reports.
+Deploy migration `20260929120000_position_close` before starting the updated API.
+Partial and bulk close controls are not part of this milestone.
+
 The terminal also reports all-time realized performance and a newest-first,
 cursor-paginated execution history. Realized results are derived from the immutable
 financial ledger rather than maintained as a second balance source.
@@ -152,6 +179,7 @@ The authenticated trading interface is:
 - `POST /api/v1/trading/orders` — place an idempotent market, limit, or stop order
 - `GET /api/v1/trading/orders/open` — load accepted pending/protection orders
 - `DELETE /api/v1/trading/orders/:orderId` — cancel an accepted order
+- `POST /api/v1/trading/positions/:positionId/close` — confirm an idempotent, version-checked full position exit
 - `GET /api/v1/trading/portfolio` — load balance, equity, and open positions
 - `GET /api/v1/trading/trades` — load cursor-paginated execution history
 - `GET /api/v1/trading/performance` — load all-time execution and realized metrics
@@ -191,6 +219,10 @@ Clerk sign-up fields, and signed ledger amounts. Playwright also exercises exist
 trading, alert, report/export, and administrative flows. Its authenticated fixtures
 share one test account, so the suite runs with one worker. Screenshot artifacts are
 written to `apps/web/test-results/` for visual inspection, not committed baselines.
+The API process started by Playwright uses a 1,000-request test quota, keeping the
+limiter enabled while rapid regressions reuse that account. This does not change
+the production/default quota, which is covered by the rate-limit unit tests.
+An already-running API reused for local tests retains its own configured quota.
 
 ```bash
 corepack pnpm lint
@@ -243,6 +275,7 @@ to the final Vercel or custom-domain origin.
 15. Responsive frontend redesign: landing, authentication, shared workspace,
     account overview, trading terminal, and realized-performance chart — complete
 16. Administrator audit explorer and transactional pending-order audit events — complete
+17. Version-checked reduce-only position closing, confirmation, and safe retries — complete
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.
