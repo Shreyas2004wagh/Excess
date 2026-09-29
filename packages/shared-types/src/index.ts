@@ -35,7 +35,7 @@ export type OrderStatus =
   | 'CANCELLED'
   | 'REJECTED';
 export type OrderPurpose =
-  'ENTRY' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'LIQUIDATION';
+  'ENTRY' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'LIQUIDATION' | 'POSITION_CLOSE';
 
 export type UserStatus = 'ACTIVE' | 'SUSPENDED';
 export type AccountStatus = 'ACTIVE' | 'RESTRICTED' | 'CLOSED';
@@ -91,6 +91,12 @@ interface OrderRequestBase {
 
 export interface MarketOrderRequest extends OrderRequestBase {
   type: 'MARKET';
+}
+
+export interface ClosePositionRequest {
+  clientOrderId: string;
+  /** Version from the position being confirmed; a changed position is rejected. */
+  expectedVersion: number;
 }
 
 export interface LimitOrderRequest extends OrderRequestBase {
@@ -210,6 +216,7 @@ export interface TradingPerformanceSummary {
 
 export interface PositionSummary {
   id: string;
+  version: number;
   symbol: string;
   signedQuantity: DecimalString;
   averageEntryPrice: DecimalString | null;

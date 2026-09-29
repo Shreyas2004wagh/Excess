@@ -58,6 +58,7 @@ enum OrderPurpose {
   STOP_LOSS
   TAKE_PROFIT
   LIQUIDATION
+  POSITION_CLOSE
 }
 
 enum LedgerEntryType {
@@ -252,6 +253,7 @@ model Position {
   averageEntryPrice Decimal?   @db.Decimal(28, 10)
   realizedPnl       Decimal    @default(0) @db.Decimal(28, 10)
   leverage          Decimal    @default(1) @db.Decimal(12, 4)
+  version           Int        @default(0)
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
   account           Account    @relation(fields: [accountId], references: [id])
