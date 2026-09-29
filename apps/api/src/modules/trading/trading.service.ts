@@ -24,6 +24,7 @@ import {
   type User,
 } from '@excess/database';
 import type {
+  ClosePositionRequest,
   DemoAccountSummary,
   Leverage,
   MarketOrderRequest,
@@ -182,6 +183,7 @@ function positionSummary(
 
   return {
     id: position.id,
+    version: position.version,
     symbol: position.instrument.symbol,
     signedQuantity: position.signedQuantity.toString(),
     averageEntryPrice: position.averageEntryPrice?.toString() ?? null,
@@ -340,6 +342,99 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
       },
     );
 
+    return this.getOrderReceipt(identity, orderId);
+  }
+
+  async closePosition(
+    identity: ClerkIdentity,
+    positionId: string,
+    request: ClosePositionRequest,
+  ): Promise<OrderPlacementResponse> {
+    const orderId = await this.inSerializableTransaction(
+      async (transaction) => {
+        const position = await transaction.position.findFirst({
+          where: {
+            id: positionId,
+            account: {
+              type: AccountType.DEMO,
+              baseCurrency: 'USD',
+              user: { clerkId: identity.clerkUserId },
+            },
+          },
+          include: { instrument: true },
+        });
+        if (!position) {
+          throw new NotFoundException({
+            code: 'POSITION_NOT_FOUND',
+            message: 'The position could not be found.',
+          });
+        }
+        const context = await this.getTradeContext(
+          transaction,
+          identity,
+          position.instrument.symbol,
+        );
+        if (context.user.identityDeletedAt) {
+          throw new ForbiddenException({
+            code: 'ACCOUNT_SUSPENDED',
+            message: 'This Excess identity is no longer active.',
+          });
+        }
+        const duplicate = await transaction.order.findUnique({
+          where: {
+            accountId_clientOrderId: {
+              accountId: context.account.id,
+              clientOrderId: request.clientOrderId,
+            },
+          },
+          include: { trades: { select: { positionId: true } } },
+        });
+        if (duplicate) {
+          if (
+            duplicate.purpose !== 'POSITION_CLOSE' ||
+            duplicate.instrumentId !== position.instrumentId ||
+            duplicate.trades[0]?.positionId !== position.id
+          ) {
+            throw new ConflictException({
+              code: 'IDEMPOTENCY_KEY_REUSED',
+              message:
+                'This request identifier already belongs to a different order.',
+            });
+          }
+          return duplicate.id;
+        }
+        if (position.signedQuantity.isZero()) {
+          throw new ConflictException({
+            code: 'POSITION_NOT_OPEN',
+            message: 'This position is already closed. Refresh your portfolio.',
+          });
+        }
+        if (position.version !== request.expectedVersion) {
+          throw new ConflictException({
+            code: 'POSITION_CHANGED',
+            message:
+              'This position changed. Refresh and confirm its current size before closing.',
+          });
+        }
+        const ticker = this.requireLiveTicker(position.instrument.symbol);
+        const order = await transaction.order.create({
+          data: {
+            accountId: context.account.id,
+            instrumentId: position.instrumentId,
+            clientOrderId: request.clientOrderId,
+            side: position.signedQuantity.isPositive() ? 'SELL' : 'BUY',
+            type: 'MARKET',
+            quantity: position.signedQuantity.abs(),
+            leverage: position.leverage,
+            status: 'PENDING',
+            purpose: 'POSITION_CLOSE',
+            reduceOnly: true,
+          },
+        });
+        await this.fillOrder(transaction, context, order, ticker);
+        return order.id;
+      },
+    );
     return this.getOrderReceipt(identity, orderId);
   }
 
@@ -846,7 +941,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
       currentSignedQuantity.isPositive() !== nextSignedQuantity.isPositive();
     const nextLeverage = nextSignedQuantity.isZero()
       ? new Prisma.Decimal(1)
-      : currentPosition && !reversesPosition
+      : currentPosition && !currentSignedQuantity.isZero() && !reversesPosition
         ? currentPosition.leverage
         : order.leverage;
     if (!order.reduceOnly) {
@@ -884,6 +979,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
             averageEntryPrice: result.averageEntryPrice,
             realizedPnl: { increment: realizedPnlDelta },
             leverage: nextLeverage,
+            version: { increment: 1 },
           },
         })
       : await transaction.position.create({
@@ -973,7 +1069,7 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
         data: { status: 'CANCELLED' },
       });
     }
-    if (order.purpose === 'ENTRY') {
+    if (order.purpose === 'ENTRY' || order.purpose === 'POSITION_CLOSE') {
       await this.syncProtectiveOrders(
         transaction,
         context,

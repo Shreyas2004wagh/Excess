@@ -49,10 +49,34 @@ const tradeHistoryQuerySchema = z.object({
   cursor: z.uuid().optional(),
   symbol: z.enum(MARKET_SYMBOLS).optional(),
 });
+const closePositionSchema = z
+  .object({
+    clientOrderId: z.uuid(),
+    expectedVersion: z.number().int().min(0).max(2_147_483_647),
+  })
+  .strict();
 
 @Controller('trading')
 export class TradingController {
   constructor(private readonly trading: TradingService) {}
+
+  @Post('positions/:positionId/close')
+  closePosition(
+    @CurrentIdentity() identity: ClerkIdentity,
+    @Param('positionId') positionId: string,
+    @Body() body: unknown,
+  ): Promise<OrderPlacementResponse> {
+    const id = z.uuid().safeParse(positionId);
+    const request = closePositionSchema.safeParse(body);
+    if (!id.success || !request.success) {
+      throw new BadRequestException({
+        code: 'INVALID_POSITION_CLOSE',
+        message:
+          'Provide a position UUID, a new request UUID, and its non-negative integer version.',
+      });
+    }
+    return this.trading.closePosition(identity, id.data, request.data);
+  }
 
   @Post('orders')
   placeOrder(
