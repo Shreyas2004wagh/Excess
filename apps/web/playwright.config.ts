@@ -17,6 +17,9 @@ export default defineConfig({
     {
       command:
         'MARKET_DATA_PROVIDER=mock ADMIN_EMAILS="$E2E_CLERK_USER_EMAIL" corepack pnpm --filter @excess/api dev',
+      // Rapid UI regressions share one user; keep limiting enabled without
+      // exhausting the production-sized quota during routine browser coverage.
+      env: { RATE_LIMIT_MAX: '1000' },
       url: 'http://localhost:4000/api/v1/health',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
