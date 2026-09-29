@@ -1,4 +1,5 @@
 import type {
+  ClosePositionRequest,
   CandleHistoryResponse,
   AdminDeliverySummary,
   AdminOverviewResponse,
@@ -139,6 +140,21 @@ export function placeOrder(token: string, order: OrderPlacementRequest) {
 
 export function getOpenOrders(token: string) {
   return request<OpenOrdersResponse>('/trading/orders/open', token);
+}
+
+export function closePosition(
+  token: string,
+  positionId: string,
+  body: ClosePositionRequest,
+) {
+  return request<OrderPlacementResponse>(
+    `/trading/positions/${positionId}/close`,
+    token,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export function getTradeHistory(

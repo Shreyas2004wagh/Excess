@@ -48,6 +48,7 @@ import { formatCurrency } from '../../lib/format';
 
 import { WorkspaceShell } from '../../components/workspace-shell';
 import { Icon } from '../../components/icon';
+import { ClosePositionPanel } from './close-position-panel';
 
 const websocketUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000';
 
@@ -85,6 +86,7 @@ function tradePurposeLabel(trade: TradeHistoryItem) {
   if (trade.purpose === 'STOP_LOSS') return 'Stop loss';
   if (trade.purpose === 'TAKE_PROFIT') return 'Take profit';
   if (trade.purpose === 'LIQUIDATION') return 'Liquidation';
+  if (trade.purpose === 'POSITION_CLOSE') return 'Position close';
   return trade.orderType === 'MARKET'
     ? 'Market execution'
     : `${trade.orderType.toLowerCase()} execution`;
@@ -231,6 +233,7 @@ export function MarketTerminal({
   );
   const [alertError, setAlertError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isClosingPosition, setIsClosingPosition] = useState(false);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(
     null,
   );
@@ -461,7 +464,13 @@ export function MarketTerminal({
 
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!orderIsValid || feedStatus !== 'LIVE') return;
+    if (
+      !orderIsValid ||
+      feedStatus !== 'LIVE' ||
+      isClosingPosition ||
+      isSubmitting
+    )
+      return;
 
     setIsSubmitting(true);
     setOrderError(null);
@@ -522,6 +531,34 @@ export function MarketTerminal({
     }
   }
 
+  async function refreshAfterClose() {
+    const token = await getToken();
+    if (!token) return;
+    const [nextPortfolio, nextOrders, nextHistory, nextPerformance] =
+      await Promise.all([
+        getPortfolio(token),
+        getOpenOrders(token),
+        getTradeHistory(token),
+        getTradingPerformance(token),
+      ]);
+    setPortfolio(nextPortfolio);
+    setOpenOrders(nextOrders.items);
+    setTradeHistory(nextHistory);
+    setHasExpandedTradeHistory(false);
+    setPerformance(nextPerformance);
+  }
+
+  function positionClosed(response: OrderPlacementResponse) {
+    setPortfolio(response.portfolio);
+    setLastOrder(response);
+    // The close is committed even if a secondary activity refresh fails.
+    void refreshAfterClose().catch(() =>
+      setTradeHistoryError(
+        'Position closed. Recent activity could not be refreshed; the next automatic refresh will retry.',
+      ),
+    );
+  }
+
   function changeOrderType(nextType: OrderType) {
     setOrderType(nextType);
     if (nextType !== 'MARKET') {
@@ -530,6 +567,7 @@ export function MarketTerminal({
   }
 
   async function cancelPendingOrder(orderId: string) {
+    if (isClosingPosition) return;
     setCancellingOrderId(orderId);
     setOrderError(null);
     try {
@@ -700,6 +738,7 @@ export function MarketTerminal({
               data-testid={`instrument-${item.symbol}`}
               key={item.symbol}
               onClick={() => selectInstrument(item.symbol)}
+              disabled={isClosingPosition || isSubmitting}
               type="button"
             >
               <span className="flex items-center gap-3">
@@ -985,7 +1024,12 @@ export function MarketTerminal({
                   ? 'bg-[var(--accent)] text-[#0b1207]'
                   : 'bg-rose-300 text-[#16090c]'
               }`}
-              disabled={isSubmitting || !orderIsValid || feedStatus !== 'LIVE'}
+              disabled={
+                isSubmitting ||
+                isClosingPosition ||
+                !orderIsValid ||
+                feedStatus !== 'LIVE'
+              }
               type="submit"
             >
               {isSubmitting
@@ -1197,6 +1241,19 @@ export function MarketTerminal({
             tracking live P/L.
           </p>
         )}
+        <ClosePositionPanel
+          key={instrument.symbol}
+          position={openPosition}
+          ticker={{ ...ticker, status: feedStatus }}
+          pendingEntries={
+            visibleOpenOrders.filter((order) => order.purpose === 'ENTRY')
+              .length
+          }
+          blocked={isSubmitting || cancellingOrderId !== null}
+          onBusyChange={setIsClosingPosition}
+          onClosed={positionClosed}
+          onRefresh={refreshAfterClose}
+        />
       </section>
 
       <section
@@ -1411,7 +1468,9 @@ export function MarketTerminal({
                   <button
                     aria-label={`Cancel ${label.toLowerCase()} order`}
                     className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted)] transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-50"
-                    disabled={cancellingOrderId === order.id}
+                    disabled={
+                      isClosingPosition || cancellingOrderId === order.id
+                    }
                     onClick={() => void cancelPendingOrder(order.id)}
                     type="button"
                   >
