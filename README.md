@@ -52,9 +52,15 @@ Redis, and a fresh live market-data ticker.
 
 After signing in, open `http://localhost:3000/terminal` for live BTC-USD and
 ETH-USD five-minute candlestick charts and a leveraged paper-trading order ticket. Market
-buys fill at the current ask and sells fill at the current bid. Limit and stop
-orders remain open until the live ticker crosses their price, and optional stop-loss/take-profit
-orders protect filled positions as an OCO pair. The terminal shows open orders,
+buys start from the current ask and sells from the current bid. Market and triggered
+stop fills receive a fixed 2 bps adverse simulated price move, rounded to the
+instrument tick; tiny moves that round away produce zero recorded slippage.
+Resting limit orders fill at the executable quote with no added slippage.
+Trade records report quoted half-spread and additional realized slippage
+separately in basis points. This is a deterministic paper-trading model, not a
+claim about real exchange execution. Limit and stop orders remain open until the
+live ticker crosses their price, and optional stop-loss/take-profit orders
+protect filled positions as an OCO pair. The terminal shows open orders,
 the open position, equity, unrealized P/L, used/free margin, and margin level on
 every live price update. Select 1×, 2×, 5×, or 10× leverage per position. A margin
 warning starts at 100%; at 50% the risk engine closes the position and prevents a
@@ -63,8 +69,9 @@ gap loss from making the demo balance negative. Set
 without an external feed.
 
 Use **Close position** in the terminal's position panel to review and confirm a
-full reduce-only market exit. Long positions sell at the live bid; shorts buy at
-the live ask. The preview P/L is an estimate, not a guaranteed execution price.
+full reduce-only market exit. Long positions start from the live bid; shorts from
+the live ask, then receive the same simulated adverse slippage. The preview P/L
+is an estimate, not a guaranteed execution price.
 The server derives side, quantity, and leverage from the stored position; it
 does not trust a browser-entered closing size. Stop-loss and take-profit orders
 are cancelled atomically with the close. Pending entry orders remain active and
@@ -276,6 +283,7 @@ to the final Vercel or custom-domain origin.
     account overview, trading terminal, and realized-performance chart — complete
 16. Administrator audit explorer and transactional pending-order audit events — complete
 17. Version-checked reduce-only position closing, confirmation, and safe retries — complete
+18. Tick-rounded simulated market/stop slippage, execution breakdown, and previews — complete
 
 Excess is paper trading software. It does not hold funds or place orders on a real
 exchange.
