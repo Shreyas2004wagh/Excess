@@ -22,6 +22,7 @@ import type {
   TradingPerformanceSummary,
   UserProfileSummary,
 } from '@excess/shared-types';
+import { SIMULATED_SLIPPAGE_BPS } from '@excess/shared-types';
 import type {
   CandlestickData,
   IChartApi,
@@ -45,6 +46,7 @@ import {
   placeOrder,
 } from '../../lib/excess-api';
 import { formatCurrency } from '../../lib/format';
+import { estimateMarketFill } from '../../lib/execution-preview';
 
 import { WorkspaceShell } from '../../components/workspace-shell';
 import { Icon } from '../../components/icon';
@@ -416,9 +418,12 @@ export function MarketTerminal({
   );
   const estimatedPrice =
     orderType === 'MARKET'
-      ? side === 'BUY'
-        ? ticker.ask
-        : ticker.bid
+      ? estimateMarketFill(
+          side === 'BUY' ? ticker.ask : ticker.bid,
+          side,
+          instrument.tickSize,
+          instrument.pricePrecision,
+        )
       : orderPrice;
   const parsedQuantity = Number(quantity);
   const parsedOrderPrice = Number(orderPrice);
@@ -999,7 +1004,13 @@ export function MarketTerminal({
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[var(--muted)]">Estimated price</span>
+                <span className="text-[var(--muted)]">
+                  {orderType === 'MARKET'
+                    ? 'Estimated fill'
+                    : orderType === 'STOP'
+                      ? 'Stop trigger'
+                      : 'Limit price'}
+                </span>
                 <span className="font-mono">${decimal(estimatedPrice)}</span>
               </div>
               <div className="flex justify-between">
@@ -1044,7 +1055,7 @@ export function MarketTerminal({
               ? 'Orders are paused until a live quote is available.'
               : !orderIsValid
                 ? 'Enter a valid quantity and the required order price to continue.'
-                : 'Virtual funds only. Market fills include simulated spread and slippage.'}
+                : `Virtual funds only. Market and triggered stop fills include the quoted spread plus ${SIMULATED_SLIPPAGE_BPS} bps simulated adverse slippage; limit fills do not slip. Estimates can change with the quote.`}
           </p>
           {orderError ? (
             <p
@@ -1245,6 +1256,8 @@ export function MarketTerminal({
           key={instrument.symbol}
           position={openPosition}
           ticker={{ ...ticker, status: feedStatus }}
+          tickSize={instrument.tickSize}
+          pricePrecision={instrument.pricePrecision}
           pendingEntries={
             visibleOpenOrders.filter((order) => order.purpose === 'ENTRY')
               .length
@@ -1364,6 +1377,10 @@ export function MarketTerminal({
                   <p className="text-xs text-[var(--muted)]">Execution</p>
                   <p className="mt-1 font-mono">
                     {trade.quantity} @ ${decimal(trade.price)}
+                  </p>
+                  <p className="mt-1 font-mono text-[10px] text-[var(--muted)]">
+                    Spread {decimal(trade.spreadBps, 3)} bps · Slippage{' '}
+                    {decimal(trade.slippageBps, 3)} bps
                   </p>
                 </div>
                 <div>

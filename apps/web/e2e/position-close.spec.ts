@@ -100,6 +100,7 @@ test('reviews, keeps, refreshes and retries a reduce-only position close on desk
     stopLossPrice: '50000',
     takeProfitPrice: '80000',
   });
+  expect(Number(entry.trade?.slippageBps)).toBeGreaterThan(0);
   expect(
     entry.portfolio.positions.find((position) => position.symbol === 'BTC-USD')
       ?.leverage,
@@ -124,6 +125,12 @@ test('reviews, keeps, refreshes and retries a reduce-only position close on desk
   const baseline = await countCloses();
   await page.goto('/terminal');
   const positions = page.locator('#positions');
+  await expect(
+    page
+      .getByTestId('trade-history')
+      .getByText(/Spread .* bps · Slippage .* bps/)
+      .first(),
+  ).toBeVisible();
   await positions
     .getByRole('button', { name: 'Close position', exact: true })
     .click();
@@ -132,6 +139,9 @@ test('reviews, keeps, refreshes and retries a reduce-only position close on desk
   ).toBeFocused();
   await expect(
     positions.getByText(/Sell the full 0.01 BTC position/),
+  ).toBeVisible();
+  await expect(
+    positions.getByText('Estimated exit incl. slippage'),
   ).toBeVisible();
   await expect(
     positions.getByText(/pending entry order.*remain active/),

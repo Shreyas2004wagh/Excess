@@ -11,12 +11,15 @@ import { useEffect, useRef, useState } from 'react';
 
 import { closePosition, ExcessApiError } from '../../lib/excess-api';
 import { formatCurrency, formatSignedCurrency } from '../../lib/format';
+import { estimateMarketFill } from '../../lib/execution-preview';
 
 type Review = { position: PositionSummary; request: ClosePositionRequest };
 
 export function ClosePositionPanel({
   position,
   ticker,
+  tickSize,
+  pricePrecision,
   pendingEntries,
   blocked,
   onClosed,
@@ -25,6 +28,8 @@ export function ClosePositionPanel({
 }: {
   position: PositionSummary | undefined;
   ticker: MarketTicker;
+  tickSize: string;
+  pricePrecision: number;
   pendingEntries: number;
   blocked: boolean;
   onClosed: (receipt: OrderPlacementResponse) => void;
@@ -58,10 +63,16 @@ export function ClosePositionPanel({
   const reviewed = review?.position;
   const side = reviewed?.signedQuantity.startsWith('-') ? 'BUY' : 'SELL';
   const quote = side === 'BUY' ? ticker.ask : ticker.bid;
+  const estimatedFill = estimateMarketFill(
+    quote,
+    side,
+    tickSize,
+    pricePrecision,
+  );
   const quantity = reviewed?.signedQuantity.replace(/^-/, '') ?? '0';
   const estimatedPnl = reviewed
     ? String(
-        (Number(quote) - Number(reviewed.averageEntryPrice)) *
+        (Number(estimatedFill) - Number(reviewed.averageEntryPrice)) *
           Number(reviewed.signedQuantity),
       )
     : '0';
@@ -184,6 +195,14 @@ export function ClosePositionPanel({
               </dt>
               <dd className="mt-1 font-mono">
                 {formatSignedCurrency(estimatedPnl, 'USD')}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-[var(--muted)]">
+                Estimated exit incl. slippage
+              </dt>
+              <dd className="mt-1 font-mono">
+                {formatCurrency(estimatedFill, 'USD')}
               </dd>
             </div>
           </dl>
