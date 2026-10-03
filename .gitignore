@@ -26,3 +26,4 @@ packages/database/src/generated/
 # Editors
 .idea/
 .vscode/
+.vercel
