@@ -1,4 +1,6 @@
 export type DecimalString = string;
+/** Fixed, adverse simulated slippage for market and triggered stop fills. */
+export const SIMULATED_SLIPPAGE_BPS = 2;
 export const MARKET_SYMBOLS = ['BTC-USD', 'ETH-USD'] as const;
 export type MarketSymbol = (typeof MARKET_SYMBOLS)[number];
 export type Leverage = 1 | 2 | 5 | 10;
@@ -142,7 +144,9 @@ export interface TradeSummary {
   price: DecimalString;
   quantity: DecimalString;
   fee: DecimalString;
+  /** Quoted half-spread relative to midpoint, excluding slippage. */
   spreadBps: DecimalString;
+  /** Additional realized adverse move relative to the executable quote. */
   slippageBps: DecimalString;
   executedAt: string;
 }

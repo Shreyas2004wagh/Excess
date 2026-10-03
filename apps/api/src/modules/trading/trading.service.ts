@@ -55,6 +55,7 @@ import {
 import type { ClerkIdentity } from '../auth/auth.types.js';
 import { DatabaseService } from '../database/database.service.js';
 import { MarketDataService } from '../market-data/market-data.service.js';
+import { executionPrice } from './execution-pricing.js';
 
 const MAX_TRANSACTION_ATTEMPTS = 5;
 const SUPPORTED_LEVERAGE = [1, 2, 5, 10] as const;
@@ -907,9 +908,13 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
       quantity = Prisma.Decimal.min(quantity, positionQuantity.abs());
     }
 
-    const fillPrice = new Prisma.Decimal(
-      order.side === 'BUY' ? ticker.ask : ticker.bid,
-    );
+    const pricing = executionPrice({
+      ticker,
+      side: order.side,
+      type: order.type,
+      tickSize: context.instrument.tickSize,
+    });
+    const fillPrice = pricing.fillPrice;
     const currentSignedQuantity =
       currentPosition?.signedQuantity ?? new Prisma.Decimal(0);
     const signedFill = order.side === 'BUY' ? quantity : quantity.negated();
@@ -1001,7 +1006,6 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
         triggeredAt: order.type === 'MARKET' ? null : new Date(),
       },
     });
-    const midPrice = new Prisma.Decimal(ticker.bid).plus(ticker.ask).div(2);
     const trade = await transaction.trade.create({
       data: {
         orderId: order.id,
@@ -1011,8 +1015,8 @@ export class TradingService implements OnApplicationBootstrap, OnModuleDestroy {
         side: order.side,
         price: fillPrice,
         quantity,
-        spreadBps: fillPrice.minus(midPrice).abs().div(midPrice).mul(10_000),
-        slippageBps: 0,
+        spreadBps: pricing.spreadBps,
+        slippageBps: pricing.slippageBps,
       },
     });
 

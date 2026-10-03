@@ -153,15 +153,21 @@ describe('Milestone 3 market-order execution', () => {
         clientOrderId,
         status: 'FILLED',
         executedQuantity: '0.1',
-        averageFillPrice: '65000.5',
+        averageFillPrice: '65013.5',
       },
-      trade: { price: '65000.5', quantity: '0.1', fee: '0' },
+      trade: {
+        price: '65013.5',
+        quantity: '0.1',
+        fee: '0',
+        spreadBps: '0.076923',
+        slippageBps: '1.999985',
+      },
       portfolio: {
         account: { balance: '10000' },
         positions: [
           {
             signedQuantity: '0.1',
-            averageEntryPrice: '65000.5',
+            averageEntryPrice: '65013.5',
           },
         ],
       },
@@ -205,8 +211,8 @@ describe('Milestone 3 market-order execution', () => {
     });
 
     expect(response.portfolio).toMatchObject({
-      account: { balance: '10099.95' },
-      equity: '10099.95',
+      account: { balance: '10097.33' },
+      equity: '10097.33',
       unrealizedPnl: '0',
       positions: [],
     });
@@ -216,8 +222,8 @@ describe('Milestone 3 market-order execution', () => {
         type: 'REALIZED_PNL',
       },
     });
-    expect(ledger.amount.toString()).toBe('99.95');
-    expect(ledger.balanceAfter.toString()).toBe('10099.95');
+    expect(ledger.amount.toString()).toBe('97.33');
+    expect(ledger.balanceAfter.toString()).toBe('10097.33');
   });
 
   it('returns live unrealized P/L for an open short position', async () => {
@@ -234,14 +240,14 @@ describe('Milestone 3 market-order execution', () => {
 
     const portfolio = await trading.getPortfolio(identity);
     expect(portfolio).toMatchObject({
-      equity: '10149.95',
-      unrealizedPnl: '50',
+      equity: '10146.67',
+      unrealizedPnl: '49.34',
       positions: [
         {
           signedQuantity: '-0.05',
-          averageEntryPrice: '66000',
+          averageEntryPrice: '65986.8',
           markPrice: '65000',
-          unrealizedPnl: '50',
+          unrealizedPnl: '49.34',
         },
       ],
     });
@@ -259,7 +265,7 @@ describe('Milestone 3 market-order execution', () => {
 
     expect(response.trade).toMatchObject({
       symbol: 'ETH-USD',
-      price: '3500.05',
+      price: '3500.75',
       quantity: '1',
     });
     expect(response.portfolio.positions).toEqual(
@@ -320,12 +326,12 @@ describe('Milestone 3 market-order execution', () => {
       winningTrades: 1,
       losingTrades: 0,
       winRate: '100',
-      grossProfit: '99.95',
+      grossProfit: '97.33',
       grossLoss: '0',
-      netRealizedPnl: '99.95',
-      tradedNotional: '19900.1',
+      netRealizedPnl: '97.33',
+      tradedNotional: '19900.12',
       averageTradeNotional: '4975.03',
-      largestWin: '99.95',
+      largestWin: '97.33',
       largestLoss: null,
     });
   });
@@ -546,10 +552,11 @@ describe('Milestone 4 pending and protective orders', () => {
     expect(order.status).toBe('FILLED');
     expect(order.triggeredAt).toBeInstanceOf(Date);
     expect(order.trades).toHaveLength(1);
-    expect(order.trades[0]?.price.toString()).toBe('65110');
+    expect(order.trades[0]?.price.toString()).toBe('65123.02');
+    expect(order.trades[0]?.slippageBps.greaterThan(0)).toBe(true);
     expect(
       (await trading.getPortfolio(pendingIdentity)).positions[0],
-    ).toMatchObject({ signedQuantity: '0.05', averageEntryPrice: '65110' });
+    ).toMatchObject({ signedQuantity: '0.05', averageEntryPrice: '65123.02' });
   });
 
   it('creates OCO protection and cancels the sibling after take-profit', async () => {
@@ -594,6 +601,14 @@ describe('Milestone 4 pending and protective orders', () => {
         expect.objectContaining({ purpose: 'TAKE_PROFIT', status: 'FILLED' }),
       ]),
     );
+    const takeProfit = protections.find(
+      (order) => order.purpose === 'TAKE_PROFIT',
+    );
+    const takeProfitTrade = await database.client.trade.findFirstOrThrow({
+      where: { orderId: takeProfit!.id },
+    });
+    expect(takeProfitTrade.price.toString()).toBe(pendingTicker.bid);
+    expect(takeProfitTrade.slippageBps.toString()).toBe('0');
     expect((await trading.getPortfolio(pendingIdentity)).positions).toEqual([]);
     expect(
       await database.client.ledgerEntry.count({
@@ -728,14 +743,14 @@ describe('Milestone 5 margin and liquidation', () => {
 
     expect(entry.order.leverage).toBe(10);
     expect(entry.portfolio).toMatchObject({
-      equity: '9999.5',
-      unrealizedPnl: '-0.5',
+      equity: '9986.5',
+      unrealizedPnl: '-13.5',
       usedMargin: '6500',
-      freeMargin: '3499.5',
+      freeMargin: '3486.5',
       riskState: 'HEALTHY',
       positions: [{ leverage: 10, usedMargin: '6500' }],
     });
-    expect(Number(entry.portfolio.marginLevel)).toBeCloseTo(153.83846, 4);
+    expect(Number(entry.portfolio.marginLevel)).toBeCloseTo(153.63846, 4);
 
     await expect(
       trading.placeOrder(riskIdentity, {
@@ -757,7 +772,7 @@ describe('Milestone 5 margin and liquidation', () => {
     riskTicker.ask = '60000.5';
     const warning = await trading.getPortfolio(riskIdentity);
     expect(warning.riskState).toBe('MARGIN_WARNING');
-    expect(Number(warning.marginLevel)).toBeCloseTo(83.325, 3);
+    expect(Number(warning.marginLevel)).toBeCloseTo(83.108333, 3);
 
     const resting = await trading.placeOrder(riskIdentity, {
       clientOrderId: randomUUID(),
@@ -812,7 +827,7 @@ describe('Milestone 5 margin and liquidation', () => {
     expect(ledger.balanceAfter.toString()).toBe('0');
     expect(ledger.metadata).toMatchObject({
       negativeBalanceProtection: true,
-      protectedAmount: '1',
+      protectedAmount: '25',
     });
   });
 });

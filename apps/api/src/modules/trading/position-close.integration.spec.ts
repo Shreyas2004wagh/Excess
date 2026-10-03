@@ -187,11 +187,11 @@ describe('Reduce-only position closing', () => {
       quantity: '0.01',
       leverage: 5,
     });
-    expect(receipt.trade).toMatchObject({ price: btc.bid, quantity: '0.01' });
+    expect(receipt.trade).toMatchObject({ price: '64986.5', quantity: '0.01' });
     expect(receipt.portfolio.positions.map((item) => item.symbol)).toEqual([
       'ETH-USD',
     ]);
-    expect(receipt.portfolio.account.balance).toBe('9999.99');
+    expect(receipt.portfolio.account.balance).toBe('9999.73');
     const closed = await database.client.position.findUniqueOrThrow({
       where: { id: position.id },
     });
@@ -210,7 +210,7 @@ describe('Reduce-only position closing', () => {
     const ledger = await database.client.ledgerEntry.findFirstOrThrow({
       where: { referenceType: 'TRADE', referenceId: receipt.trade!.id },
     });
-    expect(ledger.amount.toString()).toBe('-0.01');
+    expect(ledger.amount.toString()).toBe('-0.27');
     expect(
       await database.client.auditEvent.count({
         where: { resourceId: receipt.order.id, action: 'ORDER_FILLED' },
@@ -228,14 +228,14 @@ describe('Reduce-only position closing', () => {
     const receipt = await close(position);
     expect(receipt.trade).toMatchObject({
       side: 'BUY',
-      price: btc.ask,
+      price: '65013.5',
     });
     expect(
       new Prisma.Decimal(receipt.trade!.quantity).equals('0.00000001'),
     ).toBe(true);
     expect(receipt.portfolio.positions).toEqual([]);
     expect(receipt.portfolio.usedMargin).toBe('0');
-    expect(receipt.portfolio.account.balance).toBe('9999.99999999');
+    expect(receipt.portfolio.account.balance).toBe('9999.99999973');
   });
 
   it('executes concurrent retries with the same request key exactly once', async () => {
