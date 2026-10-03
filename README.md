@@ -1,289 +1,141 @@
 # Excess
 
-Excess is a real-time paper-trading platform built as a TypeScript modular monolith.
+[![CI](https://github.com/Shreyas2004wagh/Excess/actions/workflows/ci.yml/badge.svg)](https://github.com/Shreyas2004wagh/Excess/actions/workflows/ci.yml)
 
-The first product milestone is a complete flow in which a user receives $10,000 in
-virtual funds, watches a live BTC-USD chart, places a simulated market order, and
-sees portfolio profit and loss update in real time.
+**A real-time paper-trading terminal for learning how orders, positions, and risk interact.** Sign up, receive **$10,000 in virtual USD**, follow BTC-USD and ETH-USD, place simulated trades, and watch your portfolio update as prices move.
 
-The terminal now extends that flow to BTC-USD and ETH-USD while keeping one
-account-wide balance, margin model, and risk engine.
+> [!IMPORTANT]
+> Excess is a simulation. It does not hold funds, connect to a brokerage account, or place orders on an exchange. Its fills, spread, slippage, margin, and liquidation rules are teaching models—not predictions of real execution.
+
+## What you can do
+
+| Area                | Included today                                                                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Trading terminal    | Live five-minute candlesticks, watchlist, market/limit/stop orders, stop-loss and take-profit OCO protection                                          |
+| Portfolio & risk    | Long/short positions, 1×/2×/5×/10× leverage, live P/L and equity, margin warnings, automatic liquidation, negative-balance protection                 |
+| Safe exits          | Full reduce-only position close with version checks, idempotent retries, and confirmation of pending orders that could reopen exposure                |
+| Insights            | Execution history, realized-performance metrics, UTC date-filtered reports, CSV export                                                                |
+| Alerts & operations | One-shot price alerts, durable in-app notifications, optional email delivery, administrator audit explorer, rate limiting, health checks, and metrics |
+
+The UI is responsive across desktop and mobile. Authentication uses Clerk email/password or Google; account balances and trading records live in PostgreSQL, not in the identity provider.
 
 ## Architecture
 
-- `apps/web` — Next.js browser application
-- `apps/api` — NestJS modular-monolith API
-- `packages/database` — Prisma schema and PostgreSQL client
-- `packages/trading-engine` — deterministic order and position calculations
-- `packages/risk-engine` — margin and account-risk calculations
-- `packages/shared-types` — contracts shared by the browser and API
+Excess is a **modular monolith**. The browser and API deploy separately, but trading, risk, alerts, reporting, and administration remain modules in one NestJS application.
 
-PostgreSQL is authoritative for users, balances, orders, trades, positions, price
-alerts, and the financial ledger. Coinbase supplies public BTC-USD and ETH-USD candles and
-live ticker updates; Redis caches normalized snapshots before the NestJS WebSocket gateway
-fans them out to authenticated terminals.
-
-## Requirements
-
-- Node.js 22 or newer
-- pnpm through Corepack
-- Docker Desktop or another Docker-compatible runtime
-
-## Local setup
-
-```bash
-cp .env.example .env
-corepack pnpm install
-docker compose up -d
-corepack pnpm db:generate
-corepack pnpm db:deploy
-corepack pnpm dev
+```mermaid
+flowchart LR
+    Browser[Next.js terminal] <-->|HTTPS + WebSocket| API[NestJS API]
+    Browser --> Clerk[Clerk authentication]
+    API --> Clerk
+    API --> DB[(PostgreSQL + Prisma)]
+    API --> Redis[(Redis)]
+    Coinbase[Coinbase public market data] --> API
+    API -. optional alerts .-> Resend[Resend email]
 ```
 
-Run `corepack pnpm dlx clerk@latest init` from `apps/web` to link a Clerk
-development application. Clerk writes credentials to the ignored
-`apps/web/.env.local` file. Enable email/password and Google in the development
-instance before testing sign-in.
+| Path                      | Responsibility                                      |
+| ------------------------- | --------------------------------------------------- |
+| `apps/web`                | Next.js 16, React, Tailwind CSS, Lightweight Charts |
+| `apps/api`                | NestJS HTTP/WebSocket API and business modules      |
+| `packages/database`       | Prisma schema, migrations, and shared client        |
+| `packages/trading-engine` | Deterministic position and order calculations       |
+| `packages/risk-engine`    | Margin and account-risk calculations                |
+| `packages/shared-types`   | Browser/API contracts                               |
 
-The web application runs at `http://localhost:3000`. The API liveness endpoint is
-available at `http://localhost:4000/api/v1/health`; the deployment readiness probe
-is `http://localhost:4000/api/v1/health/ready`. Readiness requires PostgreSQL,
-Redis, and a fresh live market-data ticker.
+PostgreSQL is authoritative for accounts, balances, orders, trades, positions, alerts, and the financial ledger. Redis caches market-data snapshots and backs rate limiting; the NestJS WebSocket gateway sends live updates to terminals. The public Coinbase feed provides live quotes and candles; `MARKET_DATA_PROVIDER=mock` provides deterministic development data.
 
-After signing in, open `http://localhost:3000/terminal` for live BTC-USD and
-ETH-USD five-minute candlestick charts and a leveraged paper-trading order ticket. Market
-buys start from the current ask and sells from the current bid. Market and triggered
-stop fills receive a fixed 2 bps adverse simulated price move, rounded to the
-instrument tick; tiny moves that round away produce zero recorded slippage.
-Resting limit orders fill at the executable quote with no added slippage.
-Trade records report quoted half-spread and additional realized slippage
-separately in basis points. This is a deterministic paper-trading model, not a
-claim about real exchange execution. Limit and stop orders remain open until the
-live ticker crosses their price, and optional stop-loss/take-profit orders
-protect filled positions as an OCO pair. The terminal shows open orders,
-the open position, equity, unrealized P/L, used/free margin, and margin level on
-every live price update. Select 1×, 2×, 5×, or 10× leverage per position. A margin
-warning starts at 100%; at 50% the risk engine closes the position and prevents a
-gap loss from making the demo balance negative. Set
-`MARKET_DATA_PROVIDER=mock` for deterministic development or end-to-end tests
-without an external feed.
+## Run locally
 
-Use **Close position** in the terminal's position panel to review and confirm a
-full reduce-only market exit. Long positions start from the live bid; shorts from
-the live ask, then receive the same simulated adverse slippage. The preview P/L
-is an estimate, not a guaranteed execution price.
-The server derives side, quantity, and leverage from the stored position; it
-does not trust a browser-entered closing size. Stop-loss and take-profit orders
-are cancelled atomically with the close. Pending entry orders remain active and
-can reopen exposure; the confirmation calls this out explicitly.
-Reopening a flat position uses the newly selected leverage rather than the
-closed position's reset leverage.
+You need **Node.js 22+**, Corepack/pnpm, Docker, and a [Clerk development application](https://clerk.com/docs/nextjs/getting-started/quickstart). The database and Redis ports in `docker-compose.yml` must be free.
 
-`POST /api/v1/trading/positions/:positionId/close` accepts only a UUID
-`clientOrderId` and integer `expectedVersion`, taken from the position's portfolio
-summary. Every fill advances the position version. Changes during review return
-`POSITION_CHANGED` (409), and an already-flat position returns `POSITION_NOT_OPEN`
-(409). Review the updated position before submitting another close. A repeated
-request key returns the original execution, even if the same position has since
-reopened, without touching the new exposure. Reusing an entry order's key or a
-different position's closing key returns `IDEMPOTENCY_KEY_REUSED` (409).
+1. Install dependencies and start the local data services:
 
-The browser retains the same request key when retrying a network or server failure
-within the current confirmation. It immediately applies a confirmed portfolio
-response and refreshes order history and performance. Closing uses the existing
-serializable execution, ledger, audit, outbox, and negative-balance protection
-logic. Close executions are labelled `POSITION_CLOSE` in history and reports.
-Deploy migration `20260929120000_position_close` before starting the updated API.
-Partial and bulk close controls are not part of this milestone.
+   ```bash
+   corepack enable
+   corepack pnpm install
+   cp .env.example .env
+   docker compose up -d postgres redis
+   corepack pnpm db:generate
+   corepack pnpm db:deploy
+   ```
 
-The terminal also reports all-time realized performance and a newest-first,
-cursor-paginated execution history. Realized results are derived from the immutable
-financial ledger rather than maintained as a second balance source.
+2. Put your **development** Clerk keys in the git-ignored `apps/web/.env.local`:
 
-Open `/reports` for UTC date and instrument filters, daily realized results,
-execution totals, traded notional, recorded fees, and a full-range CSV download.
-Reports default to the last 30 UTC calendar days and allow up to 366 days.
-Both date endpoints are inclusive. Successful filters persist in the page URL.
-Pagination and downloads reuse the returned execution-time `asOf` cutoff, so
-executions after that cutoff are excluded. Each request uses a repeatable-read
-transaction; `asOf` is not a persisted database snapshot, so transactions that
-commit late with an earlier execution timestamp can appear on subsequent reads.
-Apply the filters again to refresh the cutoff.
+   ```dotenv
+   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=<your development publishable key>
+   CLERK_SECRET_KEY=<your development secret key>
+   ```
 
-Credited realized P/L is the sum of `REALIZED_PNL` ledger amounts linked to the
-selected executions, including any negative-balance protection. It excludes
-unrealized P/L, opening credits, and adjustments. Fees are reported separately;
-the report does not compute an additional net-after-fees metric. Daily cumulative P/L starts at zero for the selected
-period; it is not account equity or a balance history. An execution without a
-realized ledger entry displays `—` and exports an empty realized-P/L cell; this
-does not distinguish an opening trade from a break-even close.
+   Enable email/password in Clerk. Enable Google there too if you want to test social sign-in. The API reads this local file as well as the root `.env`; never commit real keys.
 
-The CSV contains every matching execution, not just the visible page, and retains
-full decimal precision. Exports over 10,000 rows fail with
-`REPORT_EXPORT_TOO_LARGE`; narrow the range or instrument instead of receiving
-silently truncated data. Reports are private, uncached, and available only to the
-authenticated account owner. No additional service or migration is needed.
+3. Start both applications:
 
-One-shot price alerts can watch for a move above or below a BTC-USD or ETH-USD target. A
-trigger is recorded atomically with an outbox delivery event so repeated or
-concurrent ticker processing cannot notify twice. The in-process outbox dispatcher
-claims those events with recoverable leases, retries failures with exponential
-backoff, and creates exactly one durable in-app notification per trigger. Set
-`EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, and `ALERT_EMAIL_FROM` to deliver the
-same alert by email. Provider retries use `price-alert-<outbox-event-id>` as the
-Resend idempotency key, while local and test environments default to email disabled.
+   ```bash
+   corepack pnpm dev
+   ```
 
-Set `ADMIN_EMAILS` to a comma-separated list of verified Clerk email addresses to
-grant the persisted `ADMIN` role during session bootstrap. Administrators can open
-`/admin` to inspect account activity and delivery health or requeue a failed event;
-ordinary traders receive a stable `403` from the administration API.
+Open [localhost:3000](http://localhost:3000), create an account, then visit `/terminal`. The first authenticated API access creates one demo account and one immutable $10,000 opening-credit ledger entry. The API runs on [localhost:4000](http://localhost:4000/api/v1/health); `/api/v1/health/ready` additionally checks PostgreSQL, Redis, and the market feed. If you cannot reach Coinbase during local development, set `MARKET_DATA_PROVIDER=mock` in `.env` and restart the API.
 
-Administrators can open `/admin/audit` for a searchable audit explorer, linked
-from the operations page. Filter by inclusive UTC dates, action, associated user
-UUID, resource type, or exact resource ID. Expand an event to inspect its identifiers
-and recorded details, with financial decimal strings preserved. The explorer
-defaults to the last 30 days and supports ranges up to 366 days.
+## How the simulation behaves
 
-`GET /api/v1/admin/audit-events` accepts `from`, `to`, `action`, `actorUserId`,
-`resourceType`, `resourceId`, `limit=1..100` (default 20), `cursor`, and `asOf`.
-Actions and resource types use uppercase identifiers such as `ORDER_FILLED` and
-`ORDER`. Results sort newest first by creation time and event ID. Follow-up pages
-must reuse the returned filters and `asOf` cutoff. Refreshing the explorer requests
-a new cutoff. As with reports, this is a timestamp boundary, not a durable database
-snapshot; a transaction committing late with an earlier timestamp can appear later.
-Invalid filters return `INVALID_AUDIT_QUERY`; cursors outside the selected filters
-return `INVALID_AUDIT_CURSOR`. The endpoint is private and uncached, and rejects
-ordinary, suspended, or deleted administrator identities.
+- A market buy starts from the **ask**; a market sell starts from the **bid**. Market and triggered stop fills add a fixed **2 bps adverse move**, rounded to the instrument tick. A move smaller than a tick can round to zero. Limit fills do not add slippage. Trade history records quoted half-spread and realized slippage separately.
+- Order placement and full position closing are idempotent. A close is reduce-only and checks the position version, so a stale confirmation cannot accidentally reverse exposure. Pending entry orders remain active after a close and may open a new position later.
+- Equity is `balance + unrealized P/L`; free margin is `equity − used margin`. A warning starts at a 100% margin level and automatic liquidation starts at 50%. Negative-balance protection floors a demo account at zero after a gap loss.
+- Reports and performance are derived from executions and the immutable financial ledger. Report filters use inclusive UTC dates and an execution-time cutoff for pagination; the cutoff is **not** a persisted database snapshot.
 
-New resting-order acceptance and manual cancellation events are recorded in the
-same serializable transactions as their order changes. Concurrent duplicate
-submissions do not duplicate acceptance events, and an audit-write failure rolls
-back cancellation. Existing fill, negative-balance protection, alert, and delivery
-events remain available. Earlier acceptance/cancellation actions are not backfilled,
-and automatic protection/OCO cancellations do not gain separate events in this
-milestone. Associated users identify the account involved; an automatic fill or
-risk action may retain the account owner. API details project documented flat event
-fields; arbitrary stored metadata and IP addresses are not returned. Deploy the
-`20260928120000_audit_explorer` migration to add the audit search indexes.
+Prices can change between preview and execution. The simulator does not model real order-book depth, exchange fees, funding, latency, or actual liquidity. Do not use its results as trading or financial advice.
 
-Authenticated API traffic is protected by a Redis-backed fixed-window rate limit,
-with a per-process in-memory fallback when Redis cannot be reached. Configure the
-quota with `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_SECONDS`. Every HTTP response
-includes a correlation ID and defensive browser headers, and every completed API
-request produces a structured log record. Liveness and readiness probes are exempt
-from rate limiting.
+## API at a glance
 
-Prometheus-compatible process, HTTP, outbox, and email metrics are available at
-`GET /api/v1/metrics`. Set `METRICS_BEARER_TOKEN` and configure the scraper to
-send it as a bearer token; the token is mandatory in production. A sample scrape
-configuration lives in `ops/prometheus/prometheus.yml.example`.
+All trading, reporting, and administration routes require a Clerk bearer token. Responses serialize monetary values as decimal strings.
 
-The authenticated trading interface is:
+| Route                                                 | Purpose                                          |
+| ----------------------------------------------------- | ------------------------------------------------ |
+| `POST /api/v1/session/bootstrap`                      | Provision or load the authenticated demo account |
+| `GET /api/v1/market-data/instruments`                 | Supported instruments and quotes                 |
+| `GET /api/v1/market-data/instruments/:symbol/candles` | Five-minute candle history                       |
+| `POST /api/v1/trading/orders`                         | Place market, limit, or stop orders              |
+| `POST /api/v1/trading/positions/:positionId/close`    | Version-checked full position close              |
+| `GET /api/v1/trading/portfolio`                       | Account, equity, risk, and positions             |
+| `GET /api/v1/trading/trades`                          | Cursor-paginated execution history               |
+| `GET /api/v1/reports/trading`                         | Date-filtered results and executions             |
+| `GET /api/v1/reports/trading/export`                  | Full-range CSV export (10,000-row limit)         |
+| `GET /api/v1/notifications`                           | In-app alert notifications                       |
 
-- `GET /api/v1/market-data/instruments` — list supported instruments and quotes
-- `GET /api/v1/market-data/instruments/:symbol` — load one instrument and quote
-- `GET /api/v1/market-data/instruments/:symbol/candles` — load five-minute history
-- `POST /api/v1/trading/orders` — place an idempotent market, limit, or stop order
-- `GET /api/v1/trading/orders/open` — load accepted pending/protection orders
-- `DELETE /api/v1/trading/orders/:orderId` — cancel an accepted order
-- `POST /api/v1/trading/positions/:positionId/close` — confirm an idempotent, version-checked full position exit
-- `GET /api/v1/trading/portfolio` — load balance, equity, and open positions
-- `GET /api/v1/trading/trades` — load cursor-paginated execution history
-- `GET /api/v1/trading/performance` — load all-time execution and realized metrics
-- `GET /api/v1/reports/trading` — load filtered totals, daily results, and executions
-- `GET /api/v1/reports/trading/export` — download all filtered executions as CSV
-- `POST /api/v1/alerts` — create a one-shot price alert for a supported instrument
-- `GET /api/v1/alerts` — list active, triggered, and cancelled alerts
-- `DELETE /api/v1/alerts/:alertId` — cancel an active alert
-- `GET /api/v1/notifications` — list recent in-app notifications and unread count
-- `PATCH /api/v1/notifications/:notificationId/read` — mark one notification read
-- `POST /api/v1/notifications/read-all` — mark every notification read
-- `GET /api/v1/admin/overview` — load administrator operations metrics
-- `GET /api/v1/admin/audit-events` — filter and paginate administrator audit activity
-- `POST /api/v1/admin/deliveries/:eventId/retry` — requeue a failed delivery
+The public liveness endpoint is `GET /api/v1/health`; readiness is `GET /api/v1/health/ready`. Administrators also have `/api/v1/admin/*` endpoints for operations, audit search, and failed-delivery retries.
 
-Report queries accept `from=YYYY-MM-DD`, `to=YYYY-MM-DD`, optional
-`symbol=BTC-USD|ETH-USD`, and optional `asOf=<UTC ISO timestamp>`. JSON reports
-also accept `limit=1..100` (default 20) and `cursor=<execution UUID>`; cursor
-requests must include the original `asOf` value and should reuse the other filters.
-CSV requests must omit `cursor` and `limit`. Invalid filters return
-`INVALID_REPORT_QUERY` (400); cursors outside the account/range return
-`INVALID_REPORT_CURSOR` (400). Suspended identities and non-active accounts
-cannot read or export reports.
+## Tests and checks
 
-## Quality checks
-
-The web workspace uses a shared graphite-and-lime design system, self-hosted Geist
-fonts, persistent desktop navigation, and a compact mobile tab bar. The public
-landing-page chart is explicitly illustrative; authenticated dashboard quotes and
-portfolio metrics are page-load snapshots, while the terminal streams live updates.
-The reports chart visualizes cumulative credited realized P/L for the selected
-period, starting at zero; it is not an equity curve.
-
-Frontend checks cover keyboard skip links, active navigation, reduced motion,
-mobile/tablet/desktop overflow, chart reset, protective-order controls, loaded
-Clerk sign-up fields, and signed ledger amounts. Playwright also exercises existing
-trading, alert, report/export, and administrative flows. Its authenticated fixtures
-share one test account, so the suite runs with one worker. Screenshot artifacts are
-written to `apps/web/test-results/` for visual inspection, not committed baselines.
-The API process started by Playwright uses a 1,000-request test quota, keeping the
-limiter enabled while rapid regressions reuse that account. This does not change
-the production/default quota, which is covered by the rate-limit unit tests.
-An already-running API reused for local tests retains its own configured quota.
+With PostgreSQL and Redis running, use:
 
 ```bash
+corepack pnpm format:check
 corepack pnpm lint
 corepack pnpm typecheck
 corepack pnpm test
 corepack pnpm build
-corepack pnpm test:e2e
 ```
 
-Run the authenticated API load profile with a short-lived Clerk session token:
+`corepack pnpm test:e2e` runs authenticated Playwright checks in Chromium. It needs the local Clerk development keys above and `E2E_CLERK_USER_EMAIL` set to a dedicated Clerk test user; the suite uses that one account and runs with one worker. `corepack pnpm test:load` runs the k6 API profile with `K6_AUTH_TOKEN` set to a short-lived Clerk session token. Do not use a production user or token for load testing.
 
-```bash
-K6_AUTH_TOKEN=... corepack pnpm test:load
-```
-
-Override `K6_BASE_URL`, `K6_VUS`, `K6_RAMP_UP`, `K6_DURATION`, and
-`K6_RAMP_DOWN` for staging. The profile fails when request errors reach 1%, p95
-latency reaches 500 ms, or p99 latency reaches one second.
+GitHub Actions runs formatting, lint, types, unit/integration tests, production builds, Playwright, and deployment-artifact checks on `main`.
 
 ## Deployment
 
-The NestJS API has a production container in `Dockerfile` and Railway
-Infrastructure as Code in `.railway/railway.ts`. Run `railway config plan` to
-review the API, PostgreSQL, and Redis resources, then `railway config apply` when
-the plan is correct. Add the preserved production secrets before deployment.
-Migrations run as Railway's pre-deploy command and readiness is checked before
-traffic moves.
+**The repository contains deployment configuration, not a verified public deployment.** Run a staging release and smoke-test authentication, live prices, order execution, position closing, and WebSockets before inviting users.
 
-Connect the same repository to Vercel using the repository root; `vercel.json`
-builds only `@excess/web`. Configure the public Clerk values, `NEXT_PUBLIC_API_URL`,
-and `NEXT_PUBLIC_WS_URL` with the deployed API origins. Set `WEB_ORIGIN` on Railway
-to the final Vercel or custom-domain origin.
+1. Set up a [Railway project](https://docs.railway.com/cli) for the API, PostgreSQL, and Redis. Review `.railway/railway.ts` with `railway config plan` and apply it with `railway config apply` only after checking resources and cost. Install the Railway CLI separately; the `railway` package in this repo is the Infrastructure-as-Code library, not the CLI. The API Dockerfile is at the repository root, and Railway runs Prisma migrations before deployment.
+2. Import the repository into [Vercel](https://vercel.com/docs/monorepos) for the web app, using the repository root and `vercel.json`. Set `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` to the deployed API origins, and set Railway's `WEB_ORIGIN` to the final web origin.
+3. Create a [Clerk production instance](https://clerk.com/docs/guides/development/deployment/production). Configure its production keys, domain, Google OAuth credentials, and production webhook endpoint/signing secret. Development keys are not production credentials.
+4. Configure `METRICS_BEARER_TOKEN` and either set valid Resend credentials (`RESEND_API_KEY`, `ALERT_EMAIL_FROM`) or change `EMAIL_PROVIDER` to `disabled`. Verify `/api/v1/health/ready`, sign-up, trading, alerts, and admin access after release.
 
-## Development order
+See `.env.example` for the full configuration surface. Never copy development database passwords or Clerk keys into a public deployment.
 
-1. Foundation and local infrastructure
-2. Authentication and the $10,000 demo account
-3. Live BTC-USD market data and chart — complete
-4. Atomic market-order execution — complete
-5. Positions and real-time portfolio P/L — complete for BTC-USD
-6. Pending orders: limit, stop, stop-loss, and take-profit — complete for BTC-USD
-7. Leverage, margin, liquidation, and negative-balance protection — complete for BTC-USD
-8. Persistent one-shot price alerts — complete for BTC-USD
-9. Request correlation, structured logging, rate limiting, and readiness — complete
-10. Durable in-app alert delivery and administration — complete
-11. Email delivery, Prometheus observability, deployment artifacts, and load testing — complete
-12. Multi-instrument market data, trading, portfolio risk, and alerts — complete for BTC-USD and ETH-USD
-13. Paginated trade history and account performance analytics — complete
-14. Date-filtered trading reports, daily results, and CSV export — complete
-15. Responsive frontend redesign: landing, authentication, shared workspace,
-    account overview, trading terminal, and realized-performance chart — complete
-16. Administrator audit explorer and transactional pending-order audit events — complete
-17. Version-checked reduce-only position closing, confirmation, and safe retries — complete
-18. Tick-rounded simulated market/stop slippage, execution breakdown, and previews — complete
+## Project status
 
-Excess is paper trading software. It does not hold funds or place orders on a real
-exchange.
+The paper-trading MVP is implemented for BTC-USD and ETH-USD. A green CI run and a successful staging smoke test are still required before calling a hosted release production-ready. Excess remains intentionally a modular monolith; there are no microservices to deploy or coordinate.
+
+## License
+
+No license has been selected or added yet.
