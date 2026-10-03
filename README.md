@@ -4,6 +4,10 @@
 
 **A real-time paper-trading terminal for learning how orders, positions, and risk interact.** Sign up, receive **$10,000 in virtual USD**, follow BTC-USD and ETH-USD, place simulated trades, and watch your portfolio update as prices move.
 
+**[Try the live full-stack demo](https://excess-psi.vercel.app)** · [API readiness](https://excess-demo-api.onrender.com/api/v1/health/ready)
+
+The demo runs on Vercel, Render, and Neon. The free Render API sleeps after 15 minutes without inbound traffic, so the first visit can take about a minute to wake it. Refresh or retry after it starts. The hosted demo uses Clerk development authentication and is not a production financial service.
+
 > [!IMPORTANT]
 > Excess is a simulation. It does not hold funds, connect to a brokerage account, or place orders on an exchange. Its fills, spread, slippage, margin, and liquidation rules are teaching models—not predictions of real execution.
 
@@ -123,18 +127,19 @@ GitHub Actions runs formatting, lint, types, unit/integration tests, production 
 
 ## Deployment
 
-**The repository contains deployment configuration, not a verified public deployment.** Run a staging release and smoke-test authentication, live prices, order execution, position closing, and WebSockets before inviting users.
+The verified demo uses **Vercel for Next.js**, **Render for the NestJS API and Redis-compatible Key Value**, and **Neon for PostgreSQL**. Existing account, ledger, order, trade, and position data was preserved during the database migration.
 
-1. Set up a [Railway project](https://docs.railway.com/cli) for the API, PostgreSQL, and Redis. Review `.railway/railway.ts` with `railway config plan` and apply it with `railway config apply` only after checking resources and cost. Install the Railway CLI separately; the `railway` package in this repo is the Infrastructure-as-Code library, not the CLI. The API Dockerfile is at the repository root, and Railway runs Prisma migrations before deployment.
-2. Import the repository into [Vercel](https://vercel.com/docs/monorepos) for the web app, using the repository root and `vercel.json`. Set `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` to the deployed API origins, and set Railway's `WEB_ORIGIN` to the final web origin.
-3. Create a [Clerk production instance](https://clerk.com/docs/guides/development/deployment/production). Configure its production keys, domain, Google OAuth credentials, and production webhook endpoint/signing secret. Development keys are not production credentials.
-4. Configure `METRICS_BEARER_TOKEN` and either set valid Resend credentials (`RESEND_API_KEY`, `ALERT_EMAIL_FROM`) or change `EMAIL_PROVIDER` to `disabled`. Verify `/api/v1/health/ready`, sign-up, trading, alerts, and admin access after release.
+See [the deployment guide](docs/deployment.md) for the exact monorepo build commands, environment configuration, migration connections, and verification checklist. Vercel's project root is `apps/web`; its build command must build `@excess/shared-types` before `@excess/web`. Render uses a pooled Neon connection for application traffic and a direct connection for Prisma migrations.
 
-See `.env.example` for the full configuration surface. Never copy development database passwords or Clerk keys into a public deployment.
+The optional Railway configuration remains in `.railway/railway.ts`, but Railway is **not** part of the current hosted demo. Review its resources and costs before applying it.
+
+For a production release, configure a [Clerk production instance](https://clerk.com/docs/guides/development/deployment/production), production Google OAuth credentials, a verified Clerk webhook, reliable backups, and service capacity appropriate to your traffic. The current demo has email delivery disabled and no active Clerk webhook subscription; the webhook signing secret must be replaced with the real endpoint secret before enabling identity-deletion synchronization. Free hosting is subject to quotas and cold starts.
+
+See `.env.example` for the full configuration surface. Keep all database passwords, Clerk secret keys, metrics tokens, and database exports out of Git.
 
 ## Project status
 
-The paper-trading MVP is implemented for BTC-USD and ETH-USD. A green CI run and a successful staging smoke test are still required before calling a hosted release production-ready. Excess remains intentionally a modular monolith; there are no microservices to deploy or coordinate.
+The paper-trading MVP is implemented and available as a hosted demo for BTC-USD and ETH-USD. Post-migration checks verified authenticated access, the $10,000 demo balance, ledger and trade persistence, live market data, and refresh. Production readiness still requires the deployment hardening above and ongoing CI verification. Excess remains intentionally a modular monolith; there are no microservices to deploy or coordinate.
 
 ## License
 
