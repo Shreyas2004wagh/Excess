@@ -30,7 +30,13 @@ import type {
   UTCTimestamp,
 } from 'lightweight-charts';
 import Link from 'next/link';
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { io } from 'socket.io-client';
 
 import {
@@ -62,6 +68,29 @@ function chartCandle(candle: MarketCandle): CandlestickData<UTCTimestamp> {
     low: Number(candle.low),
     close: Number(candle.close),
   };
+}
+
+const chartTimeframes = [
+  { label: '5m', seconds: 300 },
+  { label: '15m', seconds: 900 },
+  { label: '1h', seconds: 3_600 },
+] as const;
+
+function aggregateCandles(candles: MarketCandle[], seconds: number) {
+  const buckets = new Map<number, MarketCandle>();
+  for (const candle of candles) {
+    const time = Math.floor(candle.time / seconds) * seconds;
+    const current = buckets.get(time);
+    if (!current) {
+      buckets.set(time, { ...candle, time });
+      continue;
+    }
+    current.high = String(Math.max(Number(current.high), Number(candle.high)));
+    current.low = String(Math.min(Number(current.low), Number(candle.low)));
+    current.close = candle.close;
+    current.volume = String(Number(current.volume) + Number(candle.volume));
+  }
+  return [...buckets.values()];
 }
 
 function decimal(value: string, maximumFractionDigits = 2) {
@@ -184,6 +213,11 @@ export function MarketTerminal({
   const chart = useRef<IChartApi | null>(null);
   const candleSeries = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const pendingCandle = useRef<MarketCandle | null>(null);
+  const latestChartCandle = useRef<MarketCandle | null>(null);
+  const latestSourceCandle = useRef<MarketCandle | null>(null);
+  const timeframeRef = useRef<(typeof chartTimeframes)[number]['seconds']>(300);
+  const [timeframe, setTimeframe] =
+    useState<(typeof chartTimeframes)[number]['seconds']>(300);
   const [selectedSymbol, setSelectedSymbol] = useState<MarketSymbol>('BTC-USD');
   const [tickers, setTickers] = useState<Record<MarketSymbol, MarketTicker>>(
     () =>
@@ -195,6 +229,9 @@ export function MarketTerminal({
     instruments.find((item) => item.symbol === selectedSymbol) ??
     instruments[0]!;
   const candles = candlesBySymbol[instrument.symbol];
+  timeframeRef.current = timeframe;
+  const timeframeLabel =
+    chartTimeframes.find((item) => item.seconds === timeframe)?.label ?? '5m';
   const ticker = tickers[instrument.symbol] ?? instrument.ticker;
   const [feedStatus, setFeedStatus] = useState<MarketDataStatus>(ticker.status);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -244,6 +281,32 @@ export function MarketTerminal({
     null,
   );
 
+  const updateChartCandle = useCallback((candle: MarketCandle) => {
+    const seconds = timeframeRef.current;
+    const time = Math.floor(candle.time / seconds) * seconds;
+    const current = latestChartCandle.current;
+    if (current && time < current.time) return;
+    const aggregated =
+      current?.time === time
+        ? {
+            ...current,
+            high: String(Math.max(Number(current.high), Number(candle.high))),
+            low: String(Math.min(Number(current.low), Number(candle.low))),
+            close: candle.close,
+            volume: String(
+              Number(current.volume) +
+                Number(candle.volume) -
+                (latestSourceCandle.current?.time === candle.time
+                  ? Number(latestSourceCandle.current.volume)
+                  : 0),
+            ),
+          }
+        : { ...candle, time };
+    latestChartCandle.current = aggregated;
+    latestSourceCandle.current = candle;
+    candleSeries.current?.update(chartCandle(aggregated));
+  }, []);
+
   useEffect(() => {
     const container = chartContainer.current;
     if (!container) return;
@@ -280,14 +343,16 @@ export function MarketTerminal({
           wickDownColor: '#f38a9b',
           priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
         });
-        nextSeries.setData(candles.items.map(chartCandle));
-        if (pendingCandle.current) {
-          nextSeries.update(chartCandle(pendingCandle.current));
-          pendingCandle.current = null;
-        }
-        nextChart.timeScale().fitContent();
         chart.current = nextChart;
         candleSeries.current = nextSeries;
+        const initialCandles = aggregateCandles(candles.items, timeframe);
+        nextSeries.setData(initialCandles.map(chartCandle));
+        latestChartCandle.current = initialCandles.at(-1) ?? null;
+        latestSourceCandle.current = candles.items.at(-1) ?? null;
+        if (pendingCandle.current) {
+          updateChartCandle(pendingCandle.current);
+        }
+        nextChart.timeScale().fitContent();
       },
     );
 
@@ -296,8 +361,9 @@ export function MarketTerminal({
       chart.current?.remove();
       chart.current = null;
       candleSeries.current = null;
+      latestChartCandle.current = null;
     };
-  }, [candles.items]);
+  }, [candles.items, timeframe, updateChartCandle]);
 
   useEffect(() => {
     let disposed = false;
@@ -337,11 +403,8 @@ export function MarketTerminal({
         'market:candle',
         (message: { symbol: string; candle: MarketCandle }) => {
           if (message.symbol !== instrument.symbol) return;
-          if (candleSeries.current) {
-            candleSeries.current.update(chartCandle(message.candle));
-          } else {
-            pendingCandle.current = message.candle;
-          }
+          pendingCandle.current = message.candle;
+          updateChartCandle(message.candle);
         },
       );
       socket.on(
@@ -361,7 +424,7 @@ export function MarketTerminal({
       disposed = true;
       socket?.disconnect();
     };
-  }, [getToken, instrument.symbol]);
+  }, [getToken, instrument.symbol, updateChartCandle]);
 
   useEffect(() => {
     let disposed = false;
@@ -805,8 +868,24 @@ export function MarketTerminal({
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="demo-label">5m candles</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                aria-label="Chart timeframe"
+                className="flex rounded-lg border border-[var(--border)] p-0.5"
+                role="group"
+              >
+                {chartTimeframes.map((item) => (
+                  <button
+                    aria-pressed={timeframe === item.seconds}
+                    className={`min-h-7 rounded-md px-2 text-[11px] font-medium transition ${timeframe === item.seconds ? 'bg-[var(--accent)] text-[#10130d]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+                    key={item.seconds}
+                    onClick={() => setTimeframe(item.seconds)}
+                    type="button"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
               <button
                 className="button button-secondary !min-h-8 !px-2 !py-1 !text-[10px]"
                 onClick={() => chart.current?.timeScale().fitContent()}
@@ -837,12 +916,13 @@ export function MarketTerminal({
             className="terminal-chart"
             ref={chartContainer}
             role="img"
-            aria-label={`${instrument.symbol} live five-minute candlestick chart`}
+            aria-label={`${instrument.symbol} live ${timeframeLabel} candlestick chart`}
           />
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] px-5 py-3 text-[11px] text-[var(--muted)]">
             <span>
-              {candles.items.length} five-minute candles · Volume{' '}
-              {decimal(ticker.volume24h, 4)} {instrument.baseCurrency}
+              {aggregateCandles(candles.items, timeframe).length}{' '}
+              {timeframeLabel} candles · Volume {decimal(ticker.volume24h, 4)}{' '}
+              {instrument.baseCurrency}
             </span>
             <a
               className="transition hover:text-[var(--foreground)]"
