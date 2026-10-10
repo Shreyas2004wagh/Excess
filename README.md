@@ -15,7 +15,7 @@ The demo runs on Vercel, Render, and Neon. The free Render API sleeps after 15 m
 
 | Area                | Included today                                                                                                                                        |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Trading terminal    | Live five-minute candlesticks, watchlist, market/limit/stop orders, stop-loss and take-profit OCO protection                                          |
+| Trading terminal    | Live 5m/15m/1h candlestick views, watchlist, market/limit/stop orders, stop-loss and take-profit OCO protection                                       |
 | Portfolio & risk    | Long/short positions, 1×/2×/5×/10× leverage, live P/L and equity, margin warnings, automatic liquidation, negative-balance protection                 |
 | Safe exits          | Full reduce-only position close with version checks, idempotent retries, and confirmation of pending orders that could reopen exposure                |
 | Insights            | Execution history, realized-performance metrics, UTC date-filtered reports, CSV export                                                                |
