@@ -27,6 +27,7 @@ import type {
   CandlestickData,
   IChartApi,
   ISeriesApi,
+  LineData,
   UTCTimestamp,
 } from 'lightweight-charts';
 import Link from 'next/link';
@@ -91,6 +92,19 @@ function aggregateCandles(candles: MarketCandle[], seconds: number) {
     current.volume = String(Number(current.volume) + Number(candle.volume));
   }
   return [...buckets.values()];
+}
+
+function simpleMovingAverage(
+  candles: MarketCandle[],
+  period: number,
+): LineData<UTCTimestamp>[] {
+  return candles.flatMap((candle, index) => {
+    if (index < period - 1) return [];
+    const window = candles.slice(index - period + 1, index + 1);
+    const value =
+      window.reduce((sum, item) => sum + Number(item.close), 0) / period;
+    return [{ time: candle.time as UTCTimestamp, value }];
+  });
 }
 
 function decimal(value: string, maximumFractionDigits = 2) {
@@ -215,9 +229,16 @@ export function MarketTerminal({
   const pendingCandle = useRef<MarketCandle | null>(null);
   const latestChartCandle = useRef<MarketCandle | null>(null);
   const latestSourceCandle = useRef<MarketCandle | null>(null);
+  const chartCandleHistory = useRef<MarketCandle[]>([]);
+  const shortAverageSeries = useRef<ISeriesApi<'Line'> | null>(null);
+  const longAverageSeries = useRef<ISeriesApi<'Line'> | null>(null);
+  const showShortAverageRef = useRef(false);
+  const showLongAverageRef = useRef(false);
   const timeframeRef = useRef<(typeof chartTimeframes)[number]['seconds']>(300);
   const [timeframe, setTimeframe] =
     useState<(typeof chartTimeframes)[number]['seconds']>(300);
+  const [showShortAverage, setShowShortAverage] = useState(false);
+  const [showLongAverage, setShowLongAverage] = useState(false);
   const [selectedSymbol, setSelectedSymbol] = useState<MarketSymbol>('BTC-USD');
   const [tickers, setTickers] = useState<Record<MarketSymbol, MarketTicker>>(
     () =>
@@ -230,6 +251,8 @@ export function MarketTerminal({
     instruments[0]!;
   const candles = candlesBySymbol[instrument.symbol];
   timeframeRef.current = timeframe;
+  showShortAverageRef.current = showShortAverage;
+  showLongAverageRef.current = showLongAverage;
   const timeframeLabel =
     chartTimeframes.find((item) => item.seconds === timeframe)?.label ?? '5m';
   const ticker = tickers[instrument.symbol] ?? instrument.ticker;
@@ -304,7 +327,15 @@ export function MarketTerminal({
         : { ...candle, time };
     latestChartCandle.current = aggregated;
     latestSourceCandle.current = candle;
+    const history = chartCandleHistory.current;
+    if (history.at(-1)?.time === time) {
+      history[history.length - 1] = aggregated;
+    } else {
+      history.push(aggregated);
+    }
     candleSeries.current?.update(chartCandle(aggregated));
+    shortAverageSeries.current?.setData(simpleMovingAverage(history, 9));
+    longAverageSeries.current?.setData(simpleMovingAverage(history, 20));
   }, []);
 
   useEffect(() => {
@@ -314,7 +345,13 @@ export function MarketTerminal({
     let disposed = false;
 
     void import('lightweight-charts').then(
-      ({ CandlestickSeries, ColorType, CrosshairMode, createChart }) => {
+      ({
+        CandlestickSeries,
+        ColorType,
+        CrosshairMode,
+        LineSeries,
+        createChart,
+      }) => {
         if (disposed) return;
         const nextChart = createChart(container, {
           autoSize: true,
@@ -343,10 +380,29 @@ export function MarketTerminal({
           wickDownColor: '#f38a9b',
           priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
         });
+        const nextShortAverage = nextChart.addSeries(LineSeries, {
+          color: '#70b7ff',
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          visible: showShortAverageRef.current,
+        });
+        const nextLongAverage = nextChart.addSeries(LineSeries, {
+          color: '#c5a3ff',
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          visible: showLongAverageRef.current,
+        });
         chart.current = nextChart;
         candleSeries.current = nextSeries;
+        shortAverageSeries.current = nextShortAverage;
+        longAverageSeries.current = nextLongAverage;
         const initialCandles = aggregateCandles(candles.items, timeframe);
+        chartCandleHistory.current = initialCandles;
         nextSeries.setData(initialCandles.map(chartCandle));
+        nextShortAverage.setData(simpleMovingAverage(initialCandles, 9));
+        nextLongAverage.setData(simpleMovingAverage(initialCandles, 20));
         latestChartCandle.current = initialCandles.at(-1) ?? null;
         latestSourceCandle.current = candles.items.at(-1) ?? null;
         if (pendingCandle.current) {
@@ -361,9 +417,20 @@ export function MarketTerminal({
       chart.current?.remove();
       chart.current = null;
       candleSeries.current = null;
+      shortAverageSeries.current = null;
+      longAverageSeries.current = null;
       latestChartCandle.current = null;
+      chartCandleHistory.current = [];
     };
   }, [candles.items, timeframe, updateChartCandle]);
+
+  useEffect(() => {
+    shortAverageSeries.current?.applyOptions({ visible: showShortAverage });
+  }, [showShortAverage]);
+
+  useEffect(() => {
+    longAverageSeries.current?.applyOptions({ visible: showLongAverage });
+  }, [showLongAverage]);
 
   useEffect(() => {
     let disposed = false;
@@ -885,6 +952,34 @@ export function MarketTerminal({
                     {item.label}
                   </button>
                 ))}
+              </div>
+              <div
+                aria-label="Chart indicators"
+                className="flex rounded-lg border border-[var(--border)] p-0.5"
+                role="group"
+              >
+                <button
+                  aria-pressed={showShortAverage}
+                  className={`min-h-7 rounded-md px-2 text-[11px] font-medium transition ${showShortAverage ? 'bg-white/10 text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+                  onClick={() => setShowShortAverage((visible) => !visible)}
+                  type="button"
+                >
+                  <span aria-hidden="true" className="mr-1 text-sky-300">
+                    —
+                  </span>
+                  SMA 9
+                </button>
+                <button
+                  aria-pressed={showLongAverage}
+                  className={`min-h-7 rounded-md px-2 text-[11px] font-medium transition ${showLongAverage ? 'bg-white/10 text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+                  onClick={() => setShowLongAverage((visible) => !visible)}
+                  type="button"
+                >
+                  <span aria-hidden="true" className="mr-1 text-violet-300">
+                    —
+                  </span>
+                  SMA 20
+                </button>
               </div>
               <button
                 className="button button-secondary !min-h-8 !px-2 !py-1 !text-[10px]"
