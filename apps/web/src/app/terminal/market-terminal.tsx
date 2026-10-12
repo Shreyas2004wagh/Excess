@@ -25,9 +25,11 @@ import type {
 import { SIMULATED_SLIPPAGE_BPS } from '@excess/shared-types';
 import type {
   CandlestickData,
+  HistogramData,
   IChartApi,
   ISeriesApi,
   LineData,
+  MouseEventParams,
   UTCTimestamp,
 } from 'lightweight-charts';
 import Link from 'next/link';
@@ -64,6 +66,35 @@ const websocketUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000';
 function chartCandle(candle: MarketCandle): CandlestickData<UTCTimestamp> {
   return {
     time: candle.time as UTCTimestamp,
+    open: Number(candle.open),
+    high: Number(candle.high),
+    low: Number(candle.low),
+    close: Number(candle.close),
+  };
+}
+
+function chartVolume(candle: MarketCandle): HistogramData<UTCTimestamp> {
+  return {
+    time: candle.time as UTCTimestamp,
+    value: Number(candle.volume),
+    color:
+      Number(candle.close) >= Number(candle.open)
+        ? 'rgba(182, 237, 114, 0.45)'
+        : 'rgba(243, 138, 155, 0.45)',
+  };
+}
+
+type CandleInspection = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+
+function inspectCandle(candle: MarketCandle): CandleInspection {
+  return {
+    time: candle.time,
     open: Number(candle.open),
     high: Number(candle.high),
     low: Number(candle.low),
@@ -226,12 +257,14 @@ export function MarketTerminal({
   const chartContainer = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const candleSeries = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeries = useRef<ISeriesApi<'Histogram'> | null>(null);
   const pendingCandle = useRef<MarketCandle | null>(null);
   const latestChartCandle = useRef<MarketCandle | null>(null);
   const latestSourceCandle = useRef<MarketCandle | null>(null);
   const chartCandleHistory = useRef<MarketCandle[]>([]);
   const shortAverageSeries = useRef<ISeriesApi<'Line'> | null>(null);
   const longAverageSeries = useRef<ISeriesApi<'Line'> | null>(null);
+  const inspectedCandleTime = useRef<number | null>(null);
   const showShortAverageRef = useRef(false);
   const showLongAverageRef = useRef(false);
   const timeframeRef = useRef<(typeof chartTimeframes)[number]['seconds']>(300);
@@ -239,6 +272,9 @@ export function MarketTerminal({
     useState<(typeof chartTimeframes)[number]['seconds']>(300);
   const [showShortAverage, setShowShortAverage] = useState(false);
   const [showLongAverage, setShowLongAverage] = useState(false);
+  const [hoveredCandle, setHoveredCandle] = useState<CandleInspection | null>(
+    null,
+  );
   const [selectedSymbol, setSelectedSymbol] = useState<MarketSymbol>('BTC-USD');
   const [tickers, setTickers] = useState<Record<MarketSymbol, MarketTicker>>(
     () =>
@@ -256,6 +292,9 @@ export function MarketTerminal({
   const timeframeLabel =
     chartTimeframes.find((item) => item.seconds === timeframe)?.label ?? '5m';
   const ticker = tickers[instrument.symbol] ?? instrument.ticker;
+  const fallbackCandle = aggregateCandles(candles.items, timeframe).at(-1);
+  const candleInspection =
+    hoveredCandle ?? (fallbackCandle ? inspectCandle(fallbackCandle) : null);
   const [feedStatus, setFeedStatus] = useState<MarketDataStatus>(ticker.status);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [portfolio, setPortfolio] =
@@ -334,8 +373,12 @@ export function MarketTerminal({
       history.push(aggregated);
     }
     candleSeries.current?.update(chartCandle(aggregated));
+    volumeSeries.current?.update(chartVolume(aggregated));
     shortAverageSeries.current?.setData(simpleMovingAverage(history, 9));
     longAverageSeries.current?.setData(simpleMovingAverage(history, 20));
+    if (inspectedCandleTime.current === time) {
+      setHoveredCandle(inspectCandle(aggregated));
+    }
   }, []);
 
   useEffect(() => {
@@ -343,12 +386,15 @@ export function MarketTerminal({
     if (!container) return;
 
     let disposed = false;
+    let crosshairHandler:
+      ((event: MouseEventParams<UTCTimestamp>) => void) | null = null;
 
     void import('lightweight-charts').then(
       ({
         CandlestickSeries,
         ColorType,
         CrosshairMode,
+        HistogramSeries,
         LineSeries,
         createChart,
       }) => {
@@ -365,7 +411,10 @@ export function MarketTerminal({
             horzLines: { color: 'rgba(130, 144, 159, 0.08)' },
           },
           crosshair: { mode: CrosshairMode.Normal },
-          rightPriceScale: { borderColor: 'rgba(130, 144, 159, 0.16)' },
+          rightPriceScale: {
+            borderColor: 'rgba(130, 144, 159, 0.16)',
+            scaleMargins: { top: 0.08, bottom: 0.25 },
+          },
           timeScale: {
             borderColor: 'rgba(130, 144, 159, 0.16)',
             timeVisible: true,
@@ -379,6 +428,15 @@ export function MarketTerminal({
           wickUpColor: '#b6ed72',
           wickDownColor: '#f38a9b',
           priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        });
+        const nextVolumeSeries = nextChart.addSeries(HistogramSeries, {
+          priceScaleId: '',
+          priceFormat: { type: 'volume' },
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        nextChart.priceScale('').applyOptions({
+          scaleMargins: { top: 0.82, bottom: 0 },
         });
         const nextShortAverage = nextChart.addSeries(LineSeries, {
           color: '#70b7ff',
@@ -396,15 +454,34 @@ export function MarketTerminal({
         });
         chart.current = nextChart;
         candleSeries.current = nextSeries;
+        volumeSeries.current = nextVolumeSeries;
         shortAverageSeries.current = nextShortAverage;
         longAverageSeries.current = nextLongAverage;
         const initialCandles = aggregateCandles(candles.items, timeframe);
         chartCandleHistory.current = initialCandles;
         nextSeries.setData(initialCandles.map(chartCandle));
+        nextVolumeSeries.setData(initialCandles.map(chartVolume));
         nextShortAverage.setData(simpleMovingAverage(initialCandles, 9));
         nextLongAverage.setData(simpleMovingAverage(initialCandles, 20));
         latestChartCandle.current = initialCandles.at(-1) ?? null;
         latestSourceCandle.current = candles.items.at(-1) ?? null;
+        crosshairHandler = (event: MouseEventParams<UTCTimestamp>) => {
+          const data = event.seriesData.get(nextSeries);
+          if (typeof event.time !== 'number' || !data || !('open' in data)) {
+            inspectedCandleTime.current = null;
+            setHoveredCandle(null);
+            return;
+          }
+          inspectedCandleTime.current = event.time;
+          setHoveredCandle({
+            time: event.time,
+            open: data.open,
+            high: data.high,
+            low: data.low,
+            close: data.close,
+          });
+        };
+        nextChart.subscribeCrosshairMove(crosshairHandler);
         if (pendingCandle.current) {
           updateChartCandle(pendingCandle.current);
         }
@@ -414,13 +491,18 @@ export function MarketTerminal({
 
     return () => {
       disposed = true;
+      if (crosshairHandler) {
+        chart.current?.unsubscribeCrosshairMove(crosshairHandler);
+      }
       chart.current?.remove();
       chart.current = null;
       candleSeries.current = null;
+      volumeSeries.current = null;
       shortAverageSeries.current = null;
       longAverageSeries.current = null;
       latestChartCandle.current = null;
       chartCandleHistory.current = [];
+      inspectedCandleTime.current = null;
     };
   }, [candles.items, timeframe, updateChartCandle]);
 
@@ -981,6 +1063,9 @@ export function MarketTerminal({
                   SMA 20
                 </button>
               </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                Volume bars
+              </span>
               <button
                 className="button button-secondary !min-h-8 !px-2 !py-1 !text-[10px]"
                 onClick={() => chart.current?.timeScale().fitContent()}
@@ -1013,6 +1098,45 @@ export function MarketTerminal({
             role="img"
             aria-label={`${instrument.symbol} live ${timeframeLabel} candlestick chart`}
           />
+          <div
+            aria-label="Selected candle open, high, low, and close"
+            className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border)] px-5 py-3"
+            role="group"
+          >
+            <div className="mr-1">
+              <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                {hoveredCandle ? 'Crosshair' : 'Latest candle'}
+              </p>
+              <p className="mt-0.5 font-mono text-xs">
+                {candleInspection
+                  ? new Date(candleInspection.time * 1_000).toLocaleString(
+                      undefined,
+                      {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      },
+                    )
+                  : '—'}
+              </p>
+            </div>
+            {[
+              ['O', candleInspection?.open],
+              ['H', candleInspection?.high],
+              ['L', candleInspection?.low],
+              ['C', candleInspection?.close],
+            ].map(([label, value]) => (
+              <div className="flex items-center gap-1.5" key={label}>
+                <span className="text-[10px] text-[var(--muted)]">{label}</span>
+                <span className="font-mono text-xs">
+                  {typeof value === 'number'
+                    ? `$${decimal(String(value))}`
+                    : '—'}
+                </span>
+              </div>
+            ))}
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] px-5 py-3 text-[11px] text-[var(--muted)]">
             <span>
               {aggregateCandles(candles.items, timeframe).length}{' '}
