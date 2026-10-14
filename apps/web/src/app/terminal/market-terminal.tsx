@@ -9,6 +9,7 @@ import type {
   MarketInstrumentSummary,
   MarketSymbol,
   MarketTicker,
+  MarketOrderBook,
   OrderPlacementRequest,
   OrderPlacementResponse,
   OrderSide,
@@ -60,6 +61,7 @@ import { estimateMarketFill } from '../../lib/execution-preview';
 import { WorkspaceShell } from '../../components/workspace-shell';
 import { Icon } from '../../components/icon';
 import { ClosePositionPanel } from './close-position-panel';
+import { MarketDepthPanel } from './market-depth-panel';
 
 const websocketUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:4000';
 
@@ -276,6 +278,9 @@ export function MarketTerminal({
     null,
   );
   const [selectedSymbol, setSelectedSymbol] = useState<MarketSymbol>('BTC-USD');
+  const [orderBooks, setOrderBooks] = useState<
+    Partial<Record<MarketSymbol, MarketOrderBook>>
+  >({});
   const [tickers, setTickers] = useState<Record<MarketSymbol, MarketTicker>>(
     () =>
       Object.fromEntries(
@@ -386,8 +391,7 @@ export function MarketTerminal({
     if (!container) return;
 
     let disposed = false;
-    let crosshairHandler:
-      ((event: MouseEventParams<UTCTimestamp>) => void) | null = null;
+    let crosshairHandler: ((event: MouseEventParams) => void) | null = null;
 
     void import('lightweight-charts').then(
       ({
@@ -465,7 +469,7 @@ export function MarketTerminal({
         nextLongAverage.setData(simpleMovingAverage(initialCandles, 20));
         latestChartCandle.current = initialCandles.at(-1) ?? null;
         latestSourceCandle.current = candles.items.at(-1) ?? null;
-        crosshairHandler = (event: MouseEventParams<UTCTimestamp>) => {
+        crosshairHandler = (event: MouseEventParams) => {
           const data = event.seriesData.get(nextSeries);
           if (typeof event.time !== 'number' || !data || !('open' in data)) {
             inspectedCandleTime.current = null;
@@ -536,8 +540,17 @@ export function MarketTerminal({
 
       socket.on('connect', () => setStreamError(null));
       socket.on('connect_error', () => {
+        setOrderBooks({});
         setFeedStatus('OFFLINE');
         setStreamError('Reconnecting to the market stream…');
+      });
+      socket.on('disconnect', () => {
+        setOrderBooks({});
+        setFeedStatus('OFFLINE');
+        setStreamError('Reconnecting to the market stream…');
+      });
+      socket.on('market:orderbook', (book: MarketOrderBook) => {
+        setOrderBooks((current) => ({ ...current, [book.symbol]: book }));
       });
       socket.on('market:ticker', (nextTicker: MarketTicker) => {
         setTickers((current) => ({
@@ -1152,6 +1165,13 @@ export function MarketTerminal({
               Charts by TradingView
             </a>
           </div>
+          <MarketDepthPanel
+            book={orderBooks[instrument.symbol] ?? null}
+            symbol={instrument.symbol}
+            baseCurrency={instrument.baseCurrency}
+            feedStatus={feedStatus}
+            source={ticker.source}
+          />
         </section>
 
         <aside className="terminal-ticket panel p-5" id="order-ticket">
