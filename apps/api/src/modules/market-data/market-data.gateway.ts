@@ -72,6 +72,9 @@ export class MarketDataGateway
       for (const ticker of this.marketData.getCurrentTickers()) {
         client.emit('market:ticker', ticker);
       }
+      for (const book of this.marketData.getCurrentOrderBooks()) {
+        client.emit('market:orderbook', book);
+      }
     } catch {
       this.reject(client);
     }

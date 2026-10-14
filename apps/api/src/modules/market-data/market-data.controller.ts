@@ -9,6 +9,7 @@ import type {
   CandleHistoryResponse,
   MarketInstrumentSummary,
   MarketInstrumentsResponse,
+  MarketOrderBook,
 } from '@excess/shared-types';
 import { z } from 'zod';
 
@@ -48,5 +49,10 @@ export class MarketDataController {
       });
     }
     return this.marketData.getCandles(symbol, result.data.limit);
+  }
+
+  @Get(':symbol/order-book')
+  getOrderBook(@Param('symbol') symbol: string): MarketOrderBook {
+    return this.marketData.getOrderBook(symbol);
   }
 }

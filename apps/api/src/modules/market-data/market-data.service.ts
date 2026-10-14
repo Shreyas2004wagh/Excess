@@ -17,6 +17,7 @@ import type {
   MarketSymbol,
   MarketStreamEvent,
   MarketTicker,
+  MarketOrderBook,
 } from '@excess/shared-types';
 
 import { DatabaseService } from '../database/database.service.js';
@@ -46,6 +47,7 @@ export class MarketDataService
   private readonly listeners = new Set<(event: MarketStreamEvent) => void>();
   private readonly candles = new Map<MarketSymbol, MarketCandle[]>();
   private readonly tickers = new Map<MarketSymbol, MarketTicker>();
+  private readonly orderBooks = new Map<MarketSymbol, MarketOrderBook>();
   private status: MarketDataStatus = 'OFFLINE';
   private unsubscribeProvider: (() => void) | null = null;
 
@@ -91,6 +93,24 @@ export class MarketDataService
       const ticker = this.tickers.get(symbol);
       return ticker ? [ticker] : [];
     });
+  }
+
+  getOrderBook(symbol: string): MarketOrderBook {
+    const normalizedSymbol = this.assertSupportedSymbol(symbol);
+    return (
+      this.orderBooks.get(normalizedSymbol) ?? {
+        symbol: normalizedSymbol,
+        bids: [],
+        asks: [],
+        source: this.provider.source,
+        status: this.status === 'LIVE' ? 'CONNECTING' : this.status,
+        updatedAt: null,
+      }
+    );
+  }
+
+  getCurrentOrderBooks() {
+    return MARKET_SYMBOLS.map((symbol) => this.getOrderBook(symbol));
   }
 
   isReady(maximumAgeMilliseconds = 30_000) {
@@ -257,6 +277,9 @@ export class MarketDataService
   private async handleProviderEvent(event: MarketProviderEvent) {
     if (event.type === 'status') {
       this.status = event.status;
+      if (event.status === 'OFFLINE' || event.status === 'CONNECTING') {
+        this.orderBooks.clear();
+      }
       for (const symbol of MARKET_SYMBOLS) {
         const ticker = this.tickers.get(symbol);
         if (ticker) {
@@ -266,7 +289,26 @@ export class MarketDataService
           event: 'market:status',
           data: { symbol, status: event.status },
         });
+        const book = this.orderBooks.get(symbol);
+        if (book) {
+          this.orderBooks.set(symbol, { ...book, status: event.status });
+        }
+        this.broadcast({
+          event: 'market:orderbook',
+          data: this.getOrderBook(symbol),
+        });
       }
+      return;
+    }
+
+    if (event.type === 'orderbook') {
+      const book: MarketOrderBook = {
+        ...event.book,
+        source: this.provider.source,
+        status: this.status === 'STALE' ? 'STALE' : 'LIVE',
+      };
+      this.orderBooks.set(book.symbol, book);
+      this.broadcast({ event: 'market:orderbook', data: book });
       return;
     }
 

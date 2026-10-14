@@ -418,6 +418,20 @@ export interface MarketTicker {
   updatedAt: string;
 }
 
+export interface OrderBookLevel {
+  price: DecimalString;
+  quantity: DecimalString;
+}
+
+export interface MarketOrderBook {
+  symbol: MarketSymbol;
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+  source: MarketDataSource;
+  status: MarketDataStatus;
+  updatedAt: string | null;
+}
+
 export interface MarketInstrumentSummary {
   symbol: MarketSymbol;
   displayName: string;
@@ -446,6 +460,7 @@ export interface CandleHistoryResponse {
 
 export type MarketStreamEvent =
   | { event: 'market:ticker'; data: MarketTicker }
+  | { event: 'market:orderbook'; data: MarketOrderBook }
   | {
       event: 'market:candle';
       data: { symbol: MarketSymbol; candle: MarketCandle };

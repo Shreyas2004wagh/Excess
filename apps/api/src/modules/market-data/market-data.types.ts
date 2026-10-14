@@ -4,6 +4,7 @@ import {
   type MarketDataSource,
   type MarketDataStatus,
   type MarketSymbol,
+  type MarketOrderBook,
   type MarketTicker,
 } from '@excess/shared-types';
 
@@ -52,9 +53,11 @@ export function isMarketSymbol(symbol: string): symbol is MarketSymbol {
 }
 
 export type ProviderTicker = Omit<MarketTicker, 'source' | 'status'>;
+export type ProviderOrderBook = Omit<MarketOrderBook, 'source' | 'status'>;
 
 export type MarketProviderEvent =
   | { type: 'ticker'; ticker: ProviderTicker }
+  | { type: 'orderbook'; book: ProviderOrderBook }
   | { type: 'candle'; symbol: MarketSymbol; candle: MarketCandle }
   | { type: 'status'; status: MarketDataStatus };
 

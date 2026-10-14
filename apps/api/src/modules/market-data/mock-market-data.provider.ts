@@ -129,6 +129,27 @@ export class MockMarketDataProvider implements MarketDataProvider {
       };
       this.emit({ type: 'ticker', ticker });
       this.emit({
+        type: 'orderbook',
+        book: {
+          symbol,
+          updatedAt: ticker.updatedAt,
+          bids: Array.from({ length: 20 }, (_, index) => ({
+            price: (price - spread - index * spread).toFixed(2),
+            quantity: (
+              (index + 1) *
+              (symbol === 'BTC-USD' ? 0.02 : 0.4)
+            ).toFixed(8),
+          })),
+          asks: Array.from({ length: 20 }, (_, index) => ({
+            price: (price + spread + index * spread).toFixed(2),
+            quantity: (
+              (index + 1) *
+              (symbol === 'BTC-USD' ? 0.03 : 0.5)
+            ).toFixed(8),
+          })),
+        },
+      });
+      this.emit({
         type: 'candle',
         symbol,
         candle: {

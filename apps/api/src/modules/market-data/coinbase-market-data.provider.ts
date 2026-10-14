@@ -8,6 +8,8 @@ import type {
 import WebSocket from 'ws';
 import { z } from 'zod';
 
+import { CoinbaseOrderBook } from './coinbase-order-book.js';
+
 import {
   CANDLE_GRANULARITY,
   MARKET_SYMBOLS,
@@ -163,6 +165,8 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
   private lastMessageAt = 0;
   private stopped = true;
   private currentStatus: MarketDataStatus = 'OFFLINE';
+  private readonly orderBook = new CoinbaseOrderBook();
+  private orderBookTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: ConfigService) {
     this.restUrl = config.getOrThrow<string>('COINBASE_REST_URL');
@@ -184,6 +188,8 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
     }
     this.stopped = false;
     this.connect();
+    this.orderBookTimer = setInterval(() => this.flushOrderBooks(), 250);
+    this.orderBookTimer.unref();
     this.staleTimer = setInterval(() => {
       if (
         this.currentStatus === 'LIVE' &&
@@ -197,6 +203,11 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
 
   async stop() {
     this.stopped = true;
+    if (this.orderBookTimer) {
+      clearInterval(this.orderBookTimer);
+      this.orderBookTimer = null;
+    }
+    this.orderBook.reset();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -274,6 +285,7 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
       return;
     }
     this.emit({ type: 'status', status: 'CONNECTING' });
+    this.orderBook.reset();
     const socket = new WebSocket(this.websocketUrl);
     this.socket = socket;
 
@@ -295,13 +307,36 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
         }),
       );
       socket.send(JSON.stringify({ type: 'subscribe', channel: 'heartbeats' }));
+      socket.send(
+        JSON.stringify({
+          type: 'subscribe',
+          product_ids: MARKET_SYMBOLS,
+          channel: 'level2',
+        }),
+      );
       this.emit({ type: 'status', status: 'LIVE' });
     });
 
     socket.on('message', (data) => {
+      if (
+        this.stopped ||
+        this.socket !== socket ||
+        socket.readyState !== WebSocket.OPEN
+      )
+        return;
       this.lastMessageAt = Date.now();
-      for (const event of parseCoinbaseMessage(data.toString())) {
-        this.emit(event);
+      const raw = data.toString();
+      const bookResult = this.orderBook.apply(raw);
+      if (bookResult === 'resync') {
+        this.logger.warn('Resynchronizing the Coinbase order book');
+        this.emit({ type: 'status', status: 'OFFLINE' });
+        socket.close();
+        return;
+      }
+      if (bookResult !== 'updated') {
+        for (const event of parseCoinbaseMessage(raw)) {
+          this.emit(event);
+        }
       }
       if (this.currentStatus === 'STALE') {
         this.emit({ type: 'status', status: 'LIVE' });
@@ -316,9 +351,23 @@ export class CoinbaseMarketDataProvider implements MarketDataProvider {
       if (this.socket === socket) {
         this.socket = null;
       }
+      this.orderBook.reset();
       this.emit({ type: 'status', status: 'OFFLINE' });
       this.scheduleReconnect();
     });
+  }
+
+  private flushOrderBooks() {
+    const snapshots = this.orderBook.takeSnapshots();
+    if (snapshots === null) {
+      this.logger.warn('Resynchronizing a crossed Coinbase order book');
+      this.emit({ type: 'status', status: 'OFFLINE' });
+      this.socket?.close();
+      return;
+    }
+    for (const book of snapshots) {
+      this.emit({ type: 'orderbook', book });
+    }
   }
 
   private scheduleReconnect() {
