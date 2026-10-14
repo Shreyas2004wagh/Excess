@@ -13,6 +13,8 @@ The demo runs on Vercel, Render, and Neon. The free Render API sleeps after 15 m
 
 ## What you can do
 
+The terminal also includes a live order book with the nearest ten bid and ask levels, cumulative quantities, spread, and connection status for BTC-USD and ETH-USD.
+
 | Area                | Included today                                                                                                                                        |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Trading terminal    | Live 5m/15m/1h candlesticks with crosshair OHLC, volume bars, optional SMA 9/20 overlays, watchlist, and market/limit/stop orders with protection     |
@@ -90,22 +92,25 @@ Open [localhost:3000](http://localhost:3000), create an account, then visit `/te
 
 Prices can change between preview and execution. The simulator does not model real order-book depth, exchange fees, funding, latency, or actual liquidity. Do not use its results as trading or financial advice.
 
+Market depth is informational and does not determine demo fills. The API reconstructs Coinbase Level 2 snapshots and absolute size updates, then sends up to 20 levels per side at most four times per second. The panel displays the nearest ten levels per side, with sizes and cumulative totals in the base currency. Sequence gaps, invalid books, or reconnects discard the old book and require a fresh snapshot. The mock provider supplies deterministic simulated depth during development.
+
 ## API at a glance
 
 All trading, reporting, and administration routes require a Clerk bearer token. Responses serialize monetary values as decimal strings.
 
-| Route                                                 | Purpose                                          |
-| ----------------------------------------------------- | ------------------------------------------------ |
-| `POST /api/v1/session/bootstrap`                      | Provision or load the authenticated demo account |
-| `GET /api/v1/market-data/instruments`                 | Supported instruments and quotes                 |
-| `GET /api/v1/market-data/instruments/:symbol/candles` | Five-minute candle history                       |
-| `POST /api/v1/trading/orders`                         | Place market, limit, or stop orders              |
-| `POST /api/v1/trading/positions/:positionId/close`    | Version-checked full position close              |
-| `GET /api/v1/trading/portfolio`                       | Account, equity, risk, and positions             |
-| `GET /api/v1/trading/trades`                          | Cursor-paginated execution history               |
-| `GET /api/v1/reports/trading`                         | Date-filtered results and executions             |
-| `GET /api/v1/reports/trading/export`                  | Full-range CSV export (10,000-row limit)         |
-| `GET /api/v1/notifications`                           | In-app alert notifications                       |
+| Route                                                    | Purpose                                          |
+| -------------------------------------------------------- | ------------------------------------------------ |
+| `POST /api/v1/session/bootstrap`                         | Provision or load the authenticated demo account |
+| `GET /api/v1/market-data/instruments`                    | Supported instruments and quotes                 |
+| `GET /api/v1/market-data/instruments/:symbol/candles`    | Five-minute candle history                       |
+| `GET /api/v1/market-data/instruments/:symbol/order-book` | Current synchronized market depth and feed state |
+| `POST /api/v1/trading/orders`                            | Place market, limit, or stop orders              |
+| `POST /api/v1/trading/positions/:positionId/close`       | Version-checked full position close              |
+| `GET /api/v1/trading/portfolio`                          | Account, equity, risk, and positions             |
+| `GET /api/v1/trading/trades`                             | Cursor-paginated execution history               |
+| `GET /api/v1/reports/trading`                            | Date-filtered results and executions             |
+| `GET /api/v1/reports/trading/export`                     | Full-range CSV export (10,000-row limit)         |
+| `GET /api/v1/notifications`                              | In-app alert notifications                       |
 
 The public liveness endpoint is `GET /api/v1/health`; readiness is `GET /api/v1/health/ready`. Administrators also have `/api/v1/admin/*` endpoints for operations, audit search, and failed-delivery retries.
 
