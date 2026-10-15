@@ -299,6 +299,26 @@ test('renders and switches the authenticated multi-market terminal', async ({
   await expect(page.getByText('● LIVE', { exact: true })).toBeVisible();
   await expect(page.getByText('Charts by TradingView')).toBeVisible();
   await expect(page.locator('canvas').first()).toBeVisible();
+  const btcDepth = page.getByRole('region', { name: 'BTC-USD market depth' });
+  await expect(btcDepth.getByText('Live', { exact: true })).toBeVisible();
+  await expect(
+    btcDepth
+      .getByRole('table', { name: 'Bids for BTC-USD' })
+      .locator('tbody tr'),
+  ).toHaveCount(10);
+  await expect(
+    btcDepth
+      .getByRole('table', { name: 'Asks for BTC-USD' })
+      .locator('tbody tr'),
+  ).toHaveCount(10);
+  await page.getByRole('button', { name: '15m', exact: true }).click();
+  await expect(
+    page.getByRole('img', { name: 'BTC-USD live 15m candlestick chart' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'SMA 9', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'SMA 9', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   const livePrice = page.getByTestId('live-price');
   const initialPrice = await livePrice.textContent();
   await expect
@@ -310,6 +330,13 @@ test('renders and switches the authenticated multi-market terminal', async ({
     page.getByRole('heading', { name: 'ETH / USD', exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel('Quantity (ETH)')).toHaveValue('0.1');
+  const ethDepth = page.getByRole('region', { name: 'ETH-USD market depth' });
+  await expect(
+    ethDepth.getByRole('table', { name: 'Bids for ETH-USD' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('table', { name: 'Bids for BTC-USD' }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: 'Buy ETH · market' }),
   ).toBeVisible();
