@@ -1,6 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import type { ConfigService } from '@nestjs/config';
 import type { Socket } from 'socket.io';
+import type { MarketOrderBook } from '@excess/shared-types';
 
 import type { ClerkGateway } from '../auth/auth.types.js';
 import { MarketDataGateway } from './market-data.gateway.js';
@@ -23,9 +24,29 @@ const config = {
   getOrThrow: () => 'http://localhost:3000',
 } as unknown as ConfigService;
 
+const orderBooks: MarketOrderBook[] = [
+  {
+    symbol: 'BTC-USD',
+    bids: [{ price: '65000.00', quantity: '0.12500000' }],
+    asks: [{ price: '65000.01', quantity: '0.25000000' }],
+    source: 'SIMULATED',
+    status: 'LIVE',
+    updatedAt: '2026-10-15T12:00:00.000Z',
+  },
+  {
+    symbol: 'ETH-USD',
+    bids: [],
+    asks: [],
+    source: 'SIMULATED',
+    status: 'CONNECTING',
+    updatedAt: null,
+  },
+];
+
 const marketData = {
   subscribe: () => () => undefined,
   getCurrentTickers: () => [],
+  getCurrentOrderBooks: () => orderBooks,
 } as unknown as MarketDataService;
 
 describe('MarketDataGateway', () => {
@@ -44,9 +65,13 @@ describe('MarketDataGateway', () => {
       expect.objectContaining({ code: 'UNAUTHORIZED' }),
     );
     expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.emit).not.toHaveBeenCalledWith(
+      'market:orderbook',
+      expect.anything(),
+    );
   });
 
-  it('joins every supported stream with a verified Clerk session', async () => {
+  it('joins every supported stream and delivers depth with a verified Clerk session', async () => {
     const clerk = {
       authenticate: jest.fn(async () => ({
         isAuthenticated: true,
@@ -61,6 +86,9 @@ describe('MarketDataGateway', () => {
     expect(socket.join).toHaveBeenCalledWith('BTC-USD');
     expect(socket.join).toHaveBeenCalledWith('ETH-USD');
     expect(socket.disconnect).not.toHaveBeenCalled();
+    for (const book of orderBooks) {
+      expect(socket.emit).toHaveBeenCalledWith('market:orderbook', book);
+    }
     expect(socket.data).toMatchObject({
       identity: {
         clerkUserId: 'user_valid',
@@ -81,5 +109,9 @@ describe('MarketDataGateway', () => {
     await gateway.handleConnection(socket);
 
     expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.emit).not.toHaveBeenCalledWith(
+      'market:orderbook',
+      expect.anything(),
+    );
   });
 });
