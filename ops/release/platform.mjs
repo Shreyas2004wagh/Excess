@@ -212,13 +212,7 @@ export function createPlatform(
           detail = detail.replaceAll(value, '[redacted]');
         }
       }
-      detail = detail
-        .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
-        .trim()
-        .split('\n')
-        .slice(-6)
-        .join('\n')
-        .slice(-1500);
+      detail = detail.trim().split('\n').slice(-6).join('\n').slice(-1500);
       throw new Error(`Vercel ${args[0]} failed: ${detail}`);
     }
   }
