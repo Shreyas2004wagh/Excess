@@ -71,8 +71,8 @@ function providerFixture() {
     else value = data.service;
     return Response.json(value);
   };
-  const run = async (file, args) => {
-    commands.push({ file, args });
+  const run = async (file, args, options) => {
+    commands.push({ file, args, options });
     if (data.runError) throw data.runError;
     if (file === 'git') return { stdout: data.diff };
     if (args.includes('deploy'))
@@ -112,6 +112,12 @@ test('Vercel staging uses production config without promoting domains and verifi
   assert.ok(args.includes('vercel@64.0.2'));
   assert.ok(args.includes('--prod'));
   assert.ok(args.includes('--skip-domain'));
+  assert.ok(!args.includes('--scope'));
+  assert.equal(f.commands[0].options.env.VERCEL_ORG_ID, config.vercelOrgId);
+  assert.equal(
+    f.commands[0].options.env.VERCEL_PROJECT_ID,
+    config.vercelProjectId,
+  );
   assert.ok(args.includes(`githubCommitSha=${f.sha}`));
   f.data.web.meta.githubCommitSha = 'wrong';
   await assert.rejects(f.platform.stageWeb(f.sha), /did not match/);

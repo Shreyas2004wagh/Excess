@@ -181,18 +181,12 @@ export function createPlatform(
     try {
       const { stdout } = await run(
         'pnpm',
-        [
-          'dlx',
-          'vercel@64.0.2',
-          ...args,
-          '--scope',
-          config.vercelScope,
-          '--token',
-          env.VERCEL_TOKEN,
-        ],
+        ['dlx', 'vercel@64.0.2', ...args, '--token', env.VERCEL_TOKEN],
         {
           env: {
             ...env,
+            // CI already has exact, verified IDs. --scope unnecessarily calls
+            // /v2/user, which can fail for otherwise valid team-scoped tokens.
             VERCEL_ORG_ID: config.vercelOrgId,
             VERCEL_PROJECT_ID: config.vercelProjectId,
             NO_COLOR: '1',
