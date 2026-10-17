@@ -27,3 +27,5 @@ packages/database/src/generated/
 .idea/
 .vscode/
 .vercel
+release-output/
+release-input/

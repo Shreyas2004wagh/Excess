@@ -9,3 +9,5 @@ test-results
 .vercel
 .env
 .env.*
+release-output
+release-input
