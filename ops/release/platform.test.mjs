@@ -63,6 +63,12 @@ function providerFixture() {
     if (path.endsWith('/git/ref/heads/main')) value = { object: { sha } };
     else if (path.includes('/v9/projects/')) value = data.project;
     else if (path.includes('/v4/aliases/')) value = data.alias;
+    else if (path.includes('/v6/deployments'))
+      value = {
+        deployments: data.missingStage
+          ? []
+          : [{ uid: data.web.id, meta: data.web.meta }],
+      };
     else if (path.includes('/v13/deployments/')) value = data.web;
     else if (path.endsWith('/rollback')) value = { id: 'dep-recovery' };
     else if (path.endsWith('/deploys'))
@@ -75,10 +81,17 @@ function providerFixture() {
     commands.push({ file, args, options });
     if (data.runError) throw data.runError;
     if (file === 'git') return { stdout: data.diff };
-    if (args.includes('deploy'))
+    if (args.includes('deploy')) {
+      const tag = args.find((value) =>
+        value.startsWith('excessReleaseAttempt='),
+      );
+      data.web.meta.excessReleaseAttempt = tag?.split('=')[1];
       return {
-        stdout: JSON.stringify({ status: 'ok', deployment: { id: 'dpl-new' } }),
+        stdout:
+          data.stageOutput ??
+          JSON.stringify({ status: 'ok', deployment: { id: 'dpl-new' } }),
       };
+    }
     return { stdout: '' };
   };
   return {
@@ -130,6 +143,14 @@ test('preflight rejects competing provider auto-deploy and an unrelated Vercel p
   f.data.service.autoDeploy = 'no';
   f.data.project.link = { repo: 'Excess' };
   await assert.rejects(f.platform.preflight(), /auto-deployment/);
+});
+
+test('staging does not depend on CLI stdout envelopes and fails closed without a uniquely tagged build', async () => {
+  const f = providerFixture();
+  f.data.stageOutput = 'https://new.vercel.app\n';
+  assert.equal((await f.platform.stageWeb(f.sha)).id, 'dpl-new');
+  f.data.missingStage = true;
+  await assert.rejects(f.platform.stageWeb(f.sha), /Cannot uniquely identify/);
 });
 
 test('current production refuses pending work and a wrong-project alias', async () => {

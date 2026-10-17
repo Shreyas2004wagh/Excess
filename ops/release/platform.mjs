@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -301,24 +302,38 @@ export function createPlatform(
         );
     },
     async stageWeb(sha) {
-      const output = JSON.parse(
-        await command([
-          'deploy',
-          '--prod',
-          '--skip-domain',
-          '--yes',
-          '--format',
-          'json',
-          '--meta',
-          `githubCommitSha=${sha}`,
-        ]),
+      // CLI JSON envelopes vary between CI/agent modes. Resolve the build by
+      // a unique tag through the provider API, not stdout or a shared "latest".
+      const attempt = randomUUID();
+      await command([
+        'deploy',
+        '--prod',
+        '--skip-domain',
+        '--yes',
+        '--format',
+        'json',
+        '--meta',
+        `githubCommitSha=${sha}`,
+        '--meta',
+        `excessReleaseAttempt=${attempt}`,
+      ]);
+      const listed = await vercel(
+        `/v6/deployments?projectId=${config.vercelProjectId}&limit=20`,
       );
-      const result = output.deployment;
-      if (!result?.id) throw new Error('Vercel did not return a deployment ID');
-      const verified = await inspectWeb(result.id);
-      if (verified.meta?.githubCommitSha !== sha)
+      const matches = listed.deployments.filter(
+        (deployment) => deployment.meta?.excessReleaseAttempt === attempt,
+      );
+      if (matches.length !== 1 || !matches[0].uid)
+        throw new Error(
+          'Cannot uniquely identify the staged Vercel deployment',
+        );
+      const verified = await inspectWeb(matches[0].uid);
+      if (
+        verified.meta?.githubCommitSha !== sha ||
+        verified.meta?.excessReleaseAttempt !== attempt
+      )
         throw new Error('Vercel build commit did not match the tested commit');
-      return { id: result.id, url: `https://${verified.url}` };
+      return { id: verified.id, url: `https://${verified.url}` };
     },
     async deployApi(sha) {
       const result = await render(`${renderPath}/deploys`, {
