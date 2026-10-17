@@ -50,18 +50,32 @@ async function inspect() {
     const url = variables.get(key);
     if (!url) return { present: false };
     const client = new PrismaClient({ datasourceUrl: url, log: [] });
+    const observer = new PrismaClient({
+      datasourceUrl: variables.get('DATABASE_URL'),
+      log: [],
+    });
     try {
       const [session] = await client.$queryRawUnsafe(
-        'SELECT application_name FROM pg_stat_activity WHERE pid = pg_backend_pid()',
+        'SELECT pid, backend_start::text AS started, application_name FROM pg_stat_activity WHERE pid = pg_backend_pid()',
+      );
+      await client.$disconnect();
+      // Unlike application_name, backend lifetime checks session continuity.
+      // Match the start timestamp too, so a reused PID is not misidentified.
+      const [after] = await observer.$queryRawUnsafe(
+        'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1::int AND backend_start = $2::timestamptz) AS remains',
+        session.pid,
+        session.started,
       );
       return {
         connected: true,
         applicationNameIsPgBouncer: session?.application_name === 'pgbouncer',
+        backendRemainsAfterDisconnect: after.remains,
       };
     } catch {
       return { connected: false };
     } finally {
       await client.$disconnect();
+      await observer.$disconnect();
     }
   }
   // Whitelist output fields. Do not log the provider response or URL errors.
