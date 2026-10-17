@@ -54,4 +54,12 @@ If GitHub cannot run the job or an API response was lost, inspect the IDs in the
 
 Run `corepack pnpm test:release` for deterministic tests of stale-run rejection, deploy ordering, readiness/auth failures, rollback verification/failures, replay safety, and bounded polling. No cloud credentials are required for these tests.
 
+## Migration-lock incident checks
+
+The manual **Inspect release configuration** workflow reads the existing Render environment configuration and performs a read-only session query through each database URL. It reports only routing booleans and connection outcomes, never URLs, credentials, or provider response bodies. The `applicationNameIsPgBouncer` flag describes the session's application name; it is a diagnostic clue, not by itself proof of routing mode.
+
+If Prisma reports `P1002` while acquiring advisory lock `72707369`, pause automatic releases first. Inspect `pg_locks` joined to `pg_stat_activity` for that exact granted advisory lock. Revalidate the holder's PID, backend start timestamp, database, idle state, and absence of an active transaction before requesting permission to disconnect only that session. Do not reset the database, disable advisory locking, terminate all connections, or put recurring session termination into CI.
+
+A successful deployment does not establish that the lock problem is fixed. Check for a leftover lock after migration startup and confirm both the configured direct URL and actual connection behavior. If it recurs despite a direct hostname, preserve the healthy deployment and keep automation paused while investigating with the database provider. Do not assume clearing a session permanently fixes the underlying cause.
+
 References: [Render deploy lifecycle](https://render.com/docs/deploys), [Render rollbacks](https://render.com/docs/rollbacks), [Vercel staged production deployments](https://vercel.com/docs/cli/deploy#skip-domain), [Vercel rollback limits](https://vercel.com/docs/cli/rollback), and [GitHub concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).

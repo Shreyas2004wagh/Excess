@@ -56,7 +56,7 @@ async function inspect() {
       );
       return {
         connected: true,
-        pooledSession: session?.application_name === 'pgbouncer',
+        applicationNameIsPgBouncer: session?.application_name === 'pgbouncer',
       };
     } catch {
       return { connected: false };
