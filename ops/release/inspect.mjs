@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { jsonRequest } from './platform.mjs';
 
 export function describeConnection(value) {
@@ -41,6 +42,28 @@ async function inspect() {
   const variables = new Map(
     values.map(({ envVar }) => [envVar.key, envVar.value]),
   );
+  const require = createRequire(
+    new URL('../../packages/database/package.json', import.meta.url),
+  );
+  const { PrismaClient } = require('@prisma/client');
+  async function probe(key) {
+    const url = variables.get(key);
+    if (!url) return { present: false };
+    const client = new PrismaClient({ datasourceUrl: url, log: [] });
+    try {
+      const [session] = await client.$queryRawUnsafe(
+        'SELECT application_name FROM pg_stat_activity WHERE pid = pg_backend_pid()',
+      );
+      return {
+        connected: true,
+        pooledSession: session?.application_name === 'pgbouncer',
+      };
+    } catch {
+      return { connected: false };
+    } finally {
+      await client.$disconnect();
+    }
+  }
   // Whitelist output fields. Do not log the provider response or URL errors.
   console.log(
     JSON.stringify(
@@ -49,6 +72,8 @@ async function inspect() {
         migration: describeConnection(variables.get('DATABASE_URL_UNPOOLED')),
         schemaEngineOverride: variables.has('PRISMA_SCHEMA_ENGINE_BINARY'),
         pgOptionsOverride: variables.has('PGOPTIONS'),
+        runtimeProbe: await probe('DATABASE_URL'),
+        migrationProbe: await probe('DATABASE_URL_UNPOOLED'),
       },
       null,
       2,
