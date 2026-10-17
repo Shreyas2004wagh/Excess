@@ -130,6 +130,8 @@ corepack pnpm build
 
 GitHub Actions runs formatting, lint, types, unit/integration tests, production builds, Playwright, and deployment-artifact checks on `main`.
 
+Release automation has its own deterministic safety tests: `corepack pnpm test:release`. Once enabled, the separate Release workflow deploys only green, current `main` commits, verifies hosted readiness/auth protection, and attempts a checked rollback on failure. See the [activation and recovery guide](docs/releases.md); it requires two hosting tokens stored as GitHub secrets and an explicit activation variable.
+
 ## Deployment
 
 The verified demo uses **Vercel for Next.js**, **Render for the NestJS API and Redis-compatible Key Value**, and **Neon for PostgreSQL**. Existing account, ledger, order, trade, and position data was preserved during the database migration.

@@ -72,7 +72,7 @@ EMAIL_PROVIDER=disabled
 
 Startup requires a webhook-signing value even when no webhook subscription is configured. The current demo's placeholder does not constitute a working webhook integration: replace it with Clerk's actual endpoint secret and configure `/api/v1/webhooks/clerk` before relying on identity-deletion events. Do not bypass signature verification.
 
-The currently hosted API has auto-deploy disabled. A GitHub push updates the repository but does not release the API; explicitly deploy the intended commit after reviewing it.
+Keep the hosted API's provider auto-deploy disabled. The opt-in [release workflow](releases.md) deploys the exact main-branch commit only after CI passes, stages/promotes the frontend, checks hosted health/authentication, and attempts checked rollback on failure. Until its GitHub secrets and activation variable are configured and the workflow is merged, releases remain manual. Database-changing releases still require manual review.
 
 ## Neon connections and migration safety
 
