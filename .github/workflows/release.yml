@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: 'Completed Release run ID to recover (not a CI run ID)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+# Independent of CI's cancellation group: a newer push must not kill recovery.
+# Manual recovery and automatic releases share this lock.
+concurrency:
+  group: excess-production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.repository == 'Shreyas2004wagh/Excess' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (vars.RELEASE_AUTOMATION_ENABLED == 'true' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    environment:
+      name: production
+      url: https://excess-psi.vercel.app
+    steps:
+      - name: Check out the tested commit (or main for recovery)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Deploy tested release or restore saved versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && 'rollback' || 'deploy' }}
+        run: node ops/release/cli.mjs "$RELEASE_MODE"
+
+      - name: Preserve recovery checkpoint even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-state
+          path: release-output/release-state.json
+          if-no-files-found: ignore
+          retention-days: 30

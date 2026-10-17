@@ -118,6 +118,11 @@ jobs:
           node -e "JSON.parse(require('node:fs').readFileSync('vercel.json'))"
           pnpm typecheck:deployment
 
+      - name: Test release safety and rollback checks
+        run: |
+          pnpm exec eslint ops/release/*.mjs
+          pnpm test:release
+
       - name: Build production API image
         run: docker build --file Dockerfile --tag excess-api:ci .
 
