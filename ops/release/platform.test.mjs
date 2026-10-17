@@ -60,6 +60,10 @@ function providerFixture() {
     requests.push({ url, options });
     const path = new URL(url).pathname;
     let value;
+    if (path.includes('/promote/') || path.includes('/rollback/')) {
+      data.alias.deploymentId = path.split('/').at(-1);
+      return new Response(null, { status: 201 });
+    }
     if (path.endsWith('/git/ref/heads/main')) value = { object: { sha } };
     else if (path.includes('/v9/projects/')) value = data.project;
     else if (path.includes('/v4/aliases/')) value = data.alias;
@@ -209,6 +213,43 @@ test('CLI diagnostics preserve useful stderr but redact credentials and never ex
     );
     return true;
   });
+});
+
+test('frontend promotion and rollback use project-scoped APIs and wait for the public alias', async () => {
+  const f = providerFixture();
+  await f.platform.promoteWeb('dpl-new');
+  assert.equal(f.data.alias.deploymentId, 'dpl-new');
+  f.data.web.id = 'dpl-old';
+  await f.platform.rollbackWeb('dpl-old');
+  assert.equal(f.data.alias.deploymentId, 'dpl-old');
+  assert.equal(f.commands.length, 0);
+  const posts = f.requests.filter((item) => item.options.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.ok(
+    posts[0].url.includes(
+      `/v10/projects/${config.vercelProjectId}/promote/dpl-new`,
+    ),
+  );
+  assert.ok(
+    posts[1].url.includes(
+      `/v1/projects/${config.vercelProjectId}/rollback/dpl-old`,
+    ),
+  );
+  assert.ok(
+    posts.every((item) => item.url.includes(`teamId=${config.vercelOrgId}`)),
+  );
+});
+
+test('successful provider mutations may return an empty 201 response', async () => {
+  assert.equal(
+    await jsonRequest(
+      'https://api.example.com',
+      'secret',
+      {},
+      async () => new Response(null, { status: 201 }),
+    ),
+    null,
+  );
 });
 
 test('release credentials and repository identity fail closed', () => {

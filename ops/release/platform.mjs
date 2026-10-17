@@ -57,7 +57,8 @@ export async function jsonRequest(url, token, body, fetcher = fetch) {
       response.status !== 429;
     throw error;
   }
-  return response.json();
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 export async function smokeApi(origin, fetcher = fetch) {
@@ -164,11 +165,11 @@ export function createPlatform(
       body,
       fetcher,
     );
-  const vercel = (path) =>
+  const vercel = (path, body) =>
     jsonRequest(
       `https://api.vercel.com${path}${path.includes('?') ? '&' : '?'}teamId=${config.vercelOrgId}`,
       env.VERCEL_TOKEN,
-      undefined,
+      body,
       fetcher,
     );
   const github = (path) =>
@@ -242,6 +243,7 @@ export function createPlatform(
       `/v13/deployments/${encodeURIComponent(id)}`,
     );
     if (
+      deployment.id !== id ||
       deployment.projectId !== config.vercelProjectId ||
       deployment.readyState !== 'READY' ||
       deployment.target !== 'production'
@@ -390,11 +392,29 @@ export function createPlatform(
     },
     async promoteWeb(id) {
       await inspectWeb(id);
-      await command(['promote', id, '--yes', '--timeout', '3m']);
+      await vercel(
+        `/v10/projects/${config.vercelProjectId}/promote/${encodeURIComponent(id)}`,
+        {},
+      );
+      await poll(
+        async () =>
+          (await vercel(`/v4/aliases/${new URL(config.webOrigin).hostname}`))
+            .deploymentId === id,
+        { attempts: 18, delay: 10000, wait },
+      );
     },
     async rollbackWeb(id) {
       await inspectWeb(id);
-      await command(['rollback', id, '--yes', '--timeout', '3m']);
+      await vercel(
+        `/v1/projects/${config.vercelProjectId}/rollback/${encodeURIComponent(id)}`,
+        {},
+      );
+      await poll(
+        async () =>
+          (await vercel(`/v4/aliases/${new URL(config.webOrigin).hostname}`))
+            .deploymentId === id,
+        { attempts: 18, delay: 10000, wait },
+      );
     },
     async rollbackApi(id) {
       const result = await render(`${renderPath}/rollback`, { deployId: id });
