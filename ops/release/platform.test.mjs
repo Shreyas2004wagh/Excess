@@ -73,6 +73,7 @@ function providerFixture() {
   };
   const run = async (file, args) => {
     commands.push({ file, args });
+    if (data.runError) throw data.runError;
     if (file === 'git') return { stdout: data.diff };
     if (args.includes('deploy'))
       return {
@@ -160,6 +161,27 @@ test('rollback uses saved Render deploy ID, not a rebuild of latest main', async
   const request = f.requests[0];
   assert.ok(request.url.endsWith('/rollback'));
   assert.deepEqual(JSON.parse(request.options.body), { deployId: 'dep-old' });
+});
+
+test('CLI diagnostics preserve useful stderr but redact credentials and never expose argv/stdout', async () => {
+  const f = providerFixture();
+  f.data.runError = Object.assign(
+    new Error('argv includes --token vercel-secret'),
+    {
+      stderr:
+        'Error: Invalid project for vercel-secret; render-secret github-secret',
+      stdout: 'PRIVATE_DEPLOYMENT_CONFIG',
+    },
+  );
+  await assert.rejects(f.platform.stageWeb(f.sha), (error) => {
+    assert.match(error.message, /Invalid project/);
+    assert.ok(
+      !/vercel-secret|render-secret|github-secret|PRIVATE_DEPLOYMENT_CONFIG|argv/.test(
+        error.message,
+      ),
+    );
+    return true;
+  });
 });
 
 test('release credentials and repository identity fail closed', () => {

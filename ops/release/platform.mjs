@@ -202,11 +202,24 @@ export function createPlatform(
         },
       );
       return stdout;
-    } catch {
+    } catch (error) {
       // execFile's default error includes argv (and therefore the token).
-      throw new Error(
-        `Vercel ${args[0]} failed; inspect the Vercel dashboard for details`,
-      );
+      // Retain bounded stderr diagnostics, never error.message/argv or stdout
+      // (deployment JSON may contain environment configuration).
+      let detail = String(error.stderr ?? error.code ?? 'unknown CLI error');
+      for (const [name, value] of Object.entries(env)) {
+        if (/TOKEN|SECRET|PASSWORD|KEY/.test(name) && value?.length >= 4) {
+          detail = detail.replaceAll(value, '[redacted]');
+        }
+      }
+      detail = detail
+        .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+        .trim()
+        .split('\n')
+        .slice(-6)
+        .join('\n')
+        .slice(-1500);
+      throw new Error(`Vercel ${args[0]} failed: ${detail}`);
     }
   }
   async function apiDeploys() {
