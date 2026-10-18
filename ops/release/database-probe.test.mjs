@@ -1,6 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { probePostgresConnection } from './database-probe.mjs';
+import {
+  computeConnection,
+  probePostgresConnection,
+} from './database-probe.mjs';
+
+test('compute diagnostics cannot send credentials to a different endpoint or domain', () => {
+  const source = 'postgres://u:p@ep-demo.region.neon.tech/db';
+  assert.equal(
+    new URL(computeConnection(source, 'ep-demo-zy5.region.neon.tech')).hostname,
+    'ep-demo-zy5.region.neon.tech',
+  );
+  for (const host of [
+    'attacker.example',
+    'ep-other-zy5.region.neon.tech',
+    'ep-demo-zy5.other.neon.tech',
+    'ep-demo-pooler.region.neon.tech',
+  ]) {
+    assert.throws(() => computeConnection(source, host), /same Neon endpoint/);
+  }
+});
 
 test('standard PostgreSQL probe keeps credentials out of argv and uses the direct host', async () => {
   const result = await probePostgresConnection(

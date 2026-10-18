@@ -2,7 +2,10 @@ import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { jsonRequest } from './platform.mjs';
-import { probePostgresConnection } from './database-probe.mjs';
+import {
+  computeConnection,
+  probePostgresConnection,
+} from './database-probe.mjs';
 
 export function describeConnection(value) {
   if (!value) return { present: false };
@@ -79,23 +82,20 @@ async function inspect() {
       await observer.$disconnect();
     }
   }
-  async function wireProbe() {
+  async function wireProbe(value = variables.get('DATABASE_URL_UNPOOLED')) {
     const observer = new PrismaClient({
       datasourceUrl: variables.get('DATABASE_URL'),
       log: [],
     });
     try {
-      return await probePostgresConnection(
-        variables.get('DATABASE_URL_UNPOOLED'),
-        async (session) => {
-          const [after] = await observer.$queryRawUnsafe(
-            'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1::int AND backend_start = $2::timestamptz) AS remains',
-            session.pid,
-            session.started,
-          );
-          return after.remains;
-        },
-      );
+      return await probePostgresConnection(value, async (session) => {
+        const [after] = await observer.$queryRawUnsafe(
+          'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1::int AND backend_start = $2::timestamptz) AS remains',
+          session.pid,
+          session.started,
+        );
+        return after.remains;
+      });
     } finally {
       await observer.$disconnect();
     }
@@ -111,6 +111,16 @@ async function inspect() {
         runtimeProbe: await probe('DATABASE_URL'),
         migrationProbe: await probe('DATABASE_URL_UNPOOLED'),
         standardPostgresMigrationProbe: await wireProbe(),
+        ...(process.env.DIAGNOSTIC_COMPUTE_HOST
+          ? {
+              standardPostgresComputeProbe: await wireProbe(
+                computeConnection(
+                  variables.get('DATABASE_URL_UNPOOLED'),
+                  process.env.DIAGNOSTIC_COMPUTE_HOST,
+                ),
+              ),
+            }
+          : {}),
       },
       null,
       2,

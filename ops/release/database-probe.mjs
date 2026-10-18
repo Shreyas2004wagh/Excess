@@ -3,6 +3,26 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 
+export function computeConnection(value, host) {
+  if (!host) return null;
+  const url = new URL(value);
+  const [endpoint, ...suffix] = url.hostname.split('.');
+  const compute = host.split('.')[0];
+  if (
+    !url.hostname.endsWith('.neon.tech') ||
+    endpoint.includes('-pooler') ||
+    !compute.startsWith(`${endpoint}-`) ||
+    !/^[a-z0-9]+$/.test(compute.slice(endpoint.length + 1)) ||
+    compute.endsWith('-pooler') ||
+    host.slice(compute.length) !== `.${suffix.join('.')}`
+  )
+    throw new Error(
+      'Diagnostic host must be a direct compute of the same Neon endpoint',
+    );
+  url.hostname = host;
+  return url.href;
+}
+
 export async function probePostgresConnection(value, observe, run = exec) {
   try {
     const url = new URL(value);
