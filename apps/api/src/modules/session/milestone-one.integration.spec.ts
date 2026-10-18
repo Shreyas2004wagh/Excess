@@ -173,7 +173,11 @@ describe('Milestone 1 account lifecycle', () => {
           id: clerkUserId,
           primary_email_address_id: 'email_primary',
           email_addresses: [
-            { id: 'email_primary', email_address: 'updated@example.com' },
+            {
+              id: 'email_primary',
+              email_address: 'updated@example.com',
+              verification: { status: 'verified' },
+            },
           ],
           first_name: 'Updated',
           last_name: 'Trader',

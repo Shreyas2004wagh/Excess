@@ -9,6 +9,93 @@ const requiredEnvironment = {
 };
 
 describe('validateEnvironment', () => {
+  const productionAuthentication = {
+    ...requiredEnvironment,
+    CLERK_ENVIRONMENT: 'production',
+    CLERK_SECRET_KEY: 'sk_live_fixture',
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_fixture',
+    WEB_ORIGIN: 'https://trade.example.com',
+    CLERK_WEBHOOK_SIGNING_SECRET: `whsec_${'a'.repeat(44)}`,
+  };
+
+  it('keeps development authentication available for the hosted demo explicitly', () => {
+    expect(
+      validateEnvironment({
+        ...requiredEnvironment,
+        NODE_ENV: 'production',
+        CLERK_WEBHOOK_SIGNING_SECRET: 'whsec_demo',
+        METRICS_BEARER_TOKEN: 'fixture',
+      }).CLERK_ENVIRONMENT,
+    ).toBe('development');
+  });
+
+  it('validates live keys and a complete production authentication configuration', () => {
+    expect(
+      validateEnvironment(productionAuthentication).CLERK_ENVIRONMENT,
+    ).toBe('production');
+    expect(() =>
+      validateEnvironment({
+        ...productionAuthentication,
+        CLERK_SECRET_KEY: 'sk_test_fixture',
+      }),
+    ).toThrow('CLERK_SECRET_KEY');
+    expect(() =>
+      validateEnvironment({
+        ...productionAuthentication,
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_fixture',
+      }),
+    ).toThrow('CLERK_PUBLISHABLE_KEY');
+    expect(() =>
+      validateEnvironment({
+        ...productionAuthentication,
+        CLERK_WEBHOOK_SIGNING_SECRET: 'whsec_placeholder',
+      }),
+    ).toThrow('CLERK_WEBHOOK_SIGNING_SECRET');
+  });
+
+  it('does not silently use live keys with the demo configuration', () => {
+    expect(() =>
+      validateEnvironment({
+        ...productionAuthentication,
+        CLERK_ENVIRONMENT: 'development',
+      }),
+    ).toThrow('CLERK_ENVIRONMENT');
+  });
+
+  it.each([
+    'http://trade.example.com',
+    'https://localhost',
+    'https://trade.example.com/path',
+    'https://user:password@trade.example.com',
+    'https://trade.example.com?token=value',
+  ])('rejects unsafe production origin %s', (WEB_ORIGIN) => {
+    expect(() =>
+      validateEnvironment({ ...productionAuthentication, WEB_ORIGIN }),
+    ).toThrow('WEB_ORIGIN');
+  });
+
+  it('rejects mixed environments or disagreeing publishable keys without printing them', () => {
+    expect(() =>
+      validateEnvironment({
+        ...requiredEnvironment,
+        CLERK_SECRET_KEY: 'sk_live_private-fixture',
+      }),
+    ).toThrow('same environment');
+    expect(() =>
+      validateEnvironment({
+        ...requiredEnvironment,
+        CLERK_PUBLISHABLE_KEY: 'pk_test_other',
+      }),
+    ).toThrow('same instance');
+    try {
+      validateEnvironment({
+        ...productionAuthentication,
+        CLERK_SECRET_KEY: 'sk_test_private-fixture',
+      });
+    } catch (error) {
+      expect(String(error)).not.toContain('sk_test_private-fixture');
+    }
+  });
   it('treats empty optional secrets as absent in development', () => {
     expect(
       validateEnvironment({

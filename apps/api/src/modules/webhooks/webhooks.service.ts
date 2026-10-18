@@ -12,11 +12,17 @@ import type { ClerkWebhookVerifier } from './webhook-verifier.types.js';
 
 function getPrimaryEmail(data: {
   primary_email_address_id?: string | null;
-  email_addresses?: Array<{ id: string; email_address: string }>;
+  email_addresses?: Array<{
+    id: string;
+    email_address: string;
+    verification?: { status?: string } | null;
+  }>;
 }) {
   return (
     data.email_addresses?.find(
-      (email) => email.id === data.primary_email_address_id,
+      (email) =>
+        email.id === data.primary_email_address_id &&
+        email.verification?.status === 'verified',
     )?.email_address ?? null
   );
 }
@@ -67,12 +73,9 @@ export class WebhooksService {
       await this.database.client.user.updateMany({
         where: { clerkId: event.data.id },
         data: {
-          ...(email
-            ? {
-                email,
-                role: this.isAdministratorEmail(email) ? 'ADMIN' : 'TRADER',
-              }
-            : {}),
+          ...(email ? { email } : {}),
+          // Never grant or retain admin rights through an unverified primary email.
+          role: email && this.isAdministratorEmail(email) ? 'ADMIN' : 'TRADER',
           displayName: getDisplayName(event.data),
         },
       });

@@ -27,11 +27,93 @@ const environmentSchema = z
     COINBASE_REST_URL: z.url().default('https://api.exchange.coinbase.com'),
     COINBASE_WS_URL: z.url().default('wss://advanced-trade-ws.coinbase.com'),
     CLERK_SECRET_KEY: z.string().min(1),
+    // Runtime production builds may still host the explicitly permitted demo.
+    CLERK_ENVIRONMENT: z
+      .enum(['development', 'production'])
+      .default('development'),
     CLERK_PUBLISHABLE_KEY: optionalSecret,
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: optionalSecret,
     CLERK_WEBHOOK_SIGNING_SECRET: optionalSecret,
   })
   .superRefine((environment, context) => {
+    const publishableKey =
+      environment.CLERK_PUBLISHABLE_KEY ??
+      environment.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    const issue = (path: string, message: string) =>
+      context.addIssue({ code: 'custom', path: [path], message });
+    if (
+      environment.CLERK_ENVIRONMENT === 'development' &&
+      (environment.CLERK_SECRET_KEY.startsWith('sk_live_') ||
+        publishableKey?.startsWith('pk_live_'))
+    ) {
+      issue(
+        'CLERK_ENVIRONMENT',
+        'Live keys require explicit production authentication configuration',
+      );
+    }
+    if (
+      environment.CLERK_PUBLISHABLE_KEY &&
+      environment.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY &&
+      environment.CLERK_PUBLISHABLE_KEY !==
+        environment.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+    ) {
+      issue(
+        'CLERK_PUBLISHABLE_KEY',
+        'Clerk publishable keys must identify the same instance',
+      );
+    }
+    if (
+      (environment.CLERK_SECRET_KEY.startsWith('sk_live_') &&
+        publishableKey?.startsWith('pk_test_')) ||
+      (environment.CLERK_SECRET_KEY.startsWith('sk_test_') &&
+        publishableKey?.startsWith('pk_live_'))
+    ) {
+      issue(
+        'CLERK_SECRET_KEY',
+        'Clerk secret and publishable keys must use the same environment',
+      );
+    }
+    if (environment.CLERK_ENVIRONMENT === 'production') {
+      if (!environment.CLERK_SECRET_KEY.startsWith('sk_live_'))
+        issue(
+          'CLERK_SECRET_KEY',
+          'A live Clerk secret key is required for production authentication',
+        );
+      if (!publishableKey?.startsWith('pk_live_'))
+        issue(
+          'CLERK_PUBLISHABLE_KEY',
+          'A live Clerk publishable key is required for production authentication',
+        );
+      let origin: URL | undefined;
+      try {
+        origin = new URL(environment.WEB_ORIGIN);
+      } catch {
+        /* z.url reports invalid URLs without echoing values. */
+      }
+      if (
+        !origin ||
+        origin.protocol !== 'https:' ||
+        ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname) ||
+        origin.username ||
+        origin.password ||
+        origin.pathname !== '/' ||
+        origin.search ||
+        origin.hash
+      )
+        issue(
+          'WEB_ORIGIN',
+          'Production authentication requires a public HTTPS origin without a path or credentials',
+        );
+      if (
+        !/^whsec_[A-Za-z0-9+/=_-]{32,}$/.test(
+          environment.CLERK_WEBHOOK_SIGNING_SECRET ?? '',
+        )
+      )
+        issue(
+          'CLERK_WEBHOOK_SIGNING_SECRET',
+          'A valid webhook signing-secret format is required for production authentication',
+        );
+    }
     if (
       !environment.CLERK_PUBLISHABLE_KEY &&
       !environment.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
