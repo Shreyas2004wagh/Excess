@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { jsonRequest } from './platform.mjs';
+import { probePostgresConnection } from './database-probe.mjs';
 
 export function describeConnection(value) {
   if (!value) return { present: false };
@@ -78,6 +79,27 @@ async function inspect() {
       await observer.$disconnect();
     }
   }
+  async function wireProbe() {
+    const observer = new PrismaClient({
+      datasourceUrl: variables.get('DATABASE_URL'),
+      log: [],
+    });
+    try {
+      return await probePostgresConnection(
+        variables.get('DATABASE_URL_UNPOOLED'),
+        async (session) => {
+          const [after] = await observer.$queryRawUnsafe(
+            'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1::int AND backend_start = $2::timestamptz) AS remains',
+            session.pid,
+            session.started,
+          );
+          return after.remains;
+        },
+      );
+    } finally {
+      await observer.$disconnect();
+    }
+  }
   // Whitelist output fields. Do not log the provider response or URL errors.
   console.log(
     JSON.stringify(
@@ -88,6 +110,7 @@ async function inspect() {
         pgOptionsOverride: variables.has('PGOPTIONS'),
         runtimeProbe: await probe('DATABASE_URL'),
         migrationProbe: await probe('DATABASE_URL_UNPOOLED'),
+        standardPostgresMigrationProbe: await wireProbe(),
       },
       null,
       2,
