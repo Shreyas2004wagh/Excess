@@ -48,10 +48,10 @@ corepack pnpm install --frozen-lockfile && corepack pnpm db:generate && corepack
 Start command:
 
 ```bash
-DATABASE_URL="$DATABASE_URL_UNPOOLED" corepack pnpm db:deploy && corepack pnpm --filter @excess/api start
+DATABASE_URL="$DATABASE_URL_UNPOOLED" corepack pnpm --filter @excess/database db:status && corepack pnpm --filter @excess/api start
 ```
 
-The inline assignment applies the **direct** URL only to the migration command; the API then inherits the **pooled** `DATABASE_URL`. A failed migration prevents the API from starting. Use committed migrations, not `db push`.
+The inline assignment applies the **direct** URL only to the read-only migration-status check; the API then inherits the **pooled** `DATABASE_URL`. Pending, failed, or divergent migration history prevents startup. Startup never applies migrations or acquires Prisma's migration advisory lock. Automated releases already reject schema/migration changes. Apply reviewed committed migrations separately in a maintenance workflow using a verified session-preserving direct connection; never use `db push` or disable migration locking to bypass a failure.
 
 Required service configuration:
 
@@ -63,6 +63,7 @@ DATABASE_URL=<Neon pooled URL with SSL>
 DATABASE_URL_UNPOOLED=<Neon direct URL with SSL>
 REDIS_URL=<Render Key Value internal connection URL>
 CLERK_SECRET_KEY=<same Clerk instance as frontend>
+CLERK_ENVIRONMENT=development
 CLERK_PUBLISHABLE_KEY=<same Clerk instance as frontend>
 CLERK_WEBHOOK_SIGNING_SECRET=<actual Clerk endpoint signing secret when enabling webhooks>
 METRICS_BEARER_TOKEN=<strong random secret>
@@ -71,6 +72,8 @@ EMAIL_PROVIDER=disabled
 ```
 
 Startup requires a webhook-signing value even when no webhook subscription is configured. The current demo's placeholder does not constitute a working webhook integration: replace it with Clerk's actual endpoint secret and configure `/api/v1/webhooks/clerk` before relying on identity-deletion events. Do not bypass signature verification.
+
+`CLERK_ENVIRONMENT` is independent of Node's production build mode. Keep `development` for the current demo. See [production authentication](production-auth.md) before selecting `production`, which validates live keys, their consistency, a public HTTPS web origin, and the webhook-secret format. It does not create an OAuth connection or webhook subscription for you.
 
 Keep the hosted API's provider auto-deploy disabled. The opt-in [release workflow](releases.md) deploys the exact main-branch commit only after CI passes, stages/promotes the frontend, checks hosted health/authentication, and attempts checked rollback on failure. Until its GitHub secrets and activation variable are configured and the workflow is merged, releases remain manual. Database-changing releases still require manual review.
 

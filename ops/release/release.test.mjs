@@ -77,7 +77,7 @@ function fixture() {
     change: (value) => {
       current = value;
     },
-    state: () => ({ version: 1, sha, previous, candidate, status: 'released' }),
+    state: () => ({ version: 2, sha, previous, candidate, status: 'released' }),
   };
 }
 
@@ -98,6 +98,15 @@ test('obsolete CI run cannot perform even preflight or mutation', async () => {
   const f = fixture();
   f.platform.isLatest = async () => false;
   assert.equal((await deploy(f.platform, sha, f.save)).status, 'skipped');
+  assert.deepEqual(f.calls, []);
+});
+
+test('legacy checkpoints cannot restore builds that apply migrations during startup', async () => {
+  const f = fixture();
+  await assert.rejects(
+    rollback(f.platform, { ...f.state(), version: 1 }, f.save),
+    /safe startup version 2/,
+  );
   assert.deepEqual(f.calls, []);
 });
 

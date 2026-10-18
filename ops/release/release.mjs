@@ -7,7 +7,7 @@ export async function deploy(platform, sha, save) {
   await platform.checkDatabaseCompatibility(previous.api.sha, sha);
   await platform.smoke();
   const state = {
-    version: 1,
+    version: 2,
     sha,
     previous,
     candidate: {},
@@ -62,11 +62,13 @@ export async function deploy(platform, sha, save) {
 
 export async function rollback(platform, state, save) {
   if (
-    state.version !== 1 ||
+    state.version !== 2 ||
     !state.previous?.api?.id ||
     !state.previous?.web?.id
   ) {
-    throw new Error('Invalid release checkpoint');
+    throw new Error(
+      'Invalid release checkpoint: safe startup version 2 required',
+    );
   }
   await platform.preflight();
   await platform.settleApi(state.candidate.api?.id);

@@ -140,7 +140,7 @@ See [the deployment guide](docs/deployment.md) for the exact monorepo build comm
 
 The optional Railway configuration remains in `.railway/railway.ts`, but Railway is **not** part of the current hosted demo. Review its resources and costs before applying it.
 
-For a production release, configure a [Clerk production instance](https://clerk.com/docs/guides/development/deployment/production), production Google OAuth credentials, a verified Clerk webhook, reliable backups, and service capacity appropriate to your traffic. The current demo has email delivery disabled and no active Clerk webhook subscription; the webhook signing secret must be replaced with the real endpoint secret before enabling identity-deletion synchronization. Free hosting is subject to quotas and cold starts.
+For a production release, follow the [authentication cutover guide](docs/production-auth.md) to configure an owned domain, a Clerk production instance, production Google OAuth credentials, and a verified Clerk webhook; also arrange reliable backups and service capacity appropriate to your traffic. The current demo has email delivery disabled and no active Clerk webhook subscription; the webhook signing secret must be replaced with the real endpoint secret before enabling identity-deletion synchronization. Free hosting is subject to quotas and cold starts.
 
 See `.env.example` for the full configuration surface. Keep all database passwords, Clerk secret keys, metrics tokens, and database exports out of Git.
 
