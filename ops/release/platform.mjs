@@ -32,11 +32,17 @@ export async function poll(
   });
 }
 
-export async function jsonRequest(url, token, body, fetcher = fetch) {
+export async function jsonRequest(
+  url,
+  token,
+  body,
+  fetcher = fetch,
+  method = body === undefined ? 'GET' : 'POST',
+) {
   // No redirect-following on credentialed calls, and no automatic POST retry:
   // a timeout can mean a deployment was accepted but its response was lost.
   const response = await fetcher(url, {
-    method: body === undefined ? 'GET' : 'POST',
+    method,
     redirect: 'error',
     signal: AbortSignal.timeout(30000),
     headers: {
@@ -158,12 +164,13 @@ export function createPlatform(
   if (env.GITHUB_REPOSITORY !== config.repository)
     throw new Error('Release configuration belongs to a different repository');
   const renderPath = `/services/${config.renderServiceId}`;
-  const render = (path, body) =>
+  const render = (path, body, method) =>
     jsonRequest(
       `https://api.render.com/v1${path}`,
       env.RENDER_API_KEY,
       body,
       fetcher,
+      method,
     );
   const vercel = (path, body) =>
     jsonRequest(
@@ -270,6 +277,13 @@ export function createPlatform(
         throw new Error(
           'Render service/repository mismatch or provider auto-deploy is enabled',
         );
+      if (
+        service.serviceDetails?.envSpecificDetails?.startCommand !==
+        config.renderStartCommand
+      )
+        throw new Error(
+          'Render startup must check migration status without applying migrations; prepare the safe baseline first',
+        );
       const project = await vercel(`/v9/projects/${config.vercelProjectId}`);
       if (project.id !== config.vercelProjectId || project.link)
         throw new Error(
@@ -277,6 +291,85 @@ export function createPlatform(
         );
     },
     current,
+    async requireGreenCi(sha) {
+      const result = await github(
+        `/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&per_page=20`,
+      );
+      const run = result.workflow_runs.find(
+        (item) =>
+          item.head_sha === sha &&
+          item.head_branch === 'main' &&
+          item.event === 'push' &&
+          item.path === '.github/workflows/ci.yml',
+      );
+      if (
+        !run ||
+        run.status !== 'completed' ||
+        run.conclusion !== 'success' ||
+        run.head_repository?.full_name !== config.repository
+      )
+        throw new Error(
+          'The latest push CI for this exact main commit must be green',
+        );
+    },
+    async checkApplicationUnchanged(from, to) {
+      if (!/^[a-f0-9]{40}$/.test(from) || !/^[a-f0-9]{40}$/.test(to))
+        throw new Error('Invalid baseline commit');
+      const { stdout } = await run('git', [
+        'diff',
+        '--name-only',
+        from,
+        to,
+        '--',
+        'apps',
+        'packages',
+        'package.json',
+        'pnpm-lock.yaml',
+        'Dockerfile',
+      ]);
+      if (stdout.trim())
+        throw new Error(
+          'The initial startup baseline must not change application code or migrations',
+        );
+    },
+    async configureStartup() {
+      const service = await render(renderPath);
+      if (
+        service.ownerId !== config.renderOwnerId ||
+        service.repo?.replace(/\.git$/, '') !==
+          `https://github.com/${config.repository}` ||
+        service.branch !== 'main' ||
+        service.autoDeploy !== 'no' ||
+        service.serviceDetails?.url !== config.apiOrigin
+      )
+        throw new Error(
+          'Refusing to configure an unrelated or auto-deploying Render service',
+        );
+      const current = service.serviceDetails?.envSpecificDetails?.startCommand;
+      const legacy =
+        'DATABASE_URL="$DATABASE_URL_UNPOOLED" corepack pnpm db:deploy && corepack pnpm --filter @excess/api start';
+      if (![legacy, config.renderStartCommand].includes(current))
+        throw new Error(
+          'Unknown Render startup command; operator review required',
+        );
+      if (current !== config.renderStartCommand) {
+        await render(
+          renderPath,
+          {
+            serviceDetails: {
+              envSpecificDetails: { startCommand: config.renderStartCommand },
+            },
+          },
+          'PATCH',
+        );
+      }
+      const checked = await render(renderPath);
+      if (
+        checked.serviceDetails?.envSpecificDetails?.startCommand !==
+        config.renderStartCommand
+      )
+        throw new Error('Render did not save the safe startup command');
+    },
     async assertCurrent(expected) {
       const actual = await current();
       if (

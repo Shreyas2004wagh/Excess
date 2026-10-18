@@ -2,6 +2,7 @@
   "repository": "Shreyas2004wagh/Excess",
   "renderServiceId": "srv-db0dj0dg1s2s73dkatqg",
   "renderOwnerId": "tea-csppvqt6l47c738h4mi0",
+  "renderStartCommand": "DATABASE_URL=\"$DATABASE_URL_UNPOOLED\" corepack pnpm --filter @excess/database db:status && corepack pnpm --filter @excess/api start",
   "apiOrigin": "https://excess-demo-api.onrender.com",
   "vercelProjectId": "prj_X9OBJLmSsXuH0YArv6mncqJMHfFu",
   "vercelOrgId": "team_6LKKDIyoyDhBfnAKH7TdKs98",

@@ -28,7 +28,10 @@ function providerFixture() {
       branch: 'main',
       ownerId: config.renderOwnerId,
       autoDeploy: 'no',
-      serviceDetails: { url: config.apiOrigin },
+      serviceDetails: {
+        url: config.apiOrigin,
+        envSpecificDetails: { startCommand: config.renderStartCommand },
+      },
     },
     project: { id: config.vercelProjectId, link: null },
     deploys: [
@@ -60,11 +63,32 @@ function providerFixture() {
     requests.push({ url, options });
     const path = new URL(url).pathname;
     let value;
+    if (options.method === 'PATCH') {
+      Object.assign(
+        data.service.serviceDetails.envSpecificDetails,
+        JSON.parse(options.body).serviceDetails.envSpecificDetails,
+      );
+      return Response.json(data.service);
+    }
     if (path.includes('/promote/') || path.includes('/rollback/')) {
       data.alias.deploymentId = path.split('/').at(-1);
       return new Response(null, { status: 201 });
     }
     if (path.endsWith('/git/ref/heads/main')) value = { object: { sha } };
+    else if (path.endsWith('/actions/workflows/ci.yml/runs'))
+      value = {
+        workflow_runs: [
+          {
+            head_sha: sha,
+            head_branch: 'main',
+            event: 'push',
+            path: '.github/workflows/ci.yml',
+            status: 'completed',
+            conclusion: 'success',
+            head_repository: { full_name: config.repository },
+          },
+        ],
+      };
     else if (path.includes('/v9/projects/')) value = data.project;
     else if (path.includes('/v4/aliases/')) value = data.alias;
     else if (path.includes('/v6/deployments'))
@@ -147,6 +171,26 @@ test('preflight rejects competing provider auto-deploy and an unrelated Vercel p
   f.data.service.autoDeploy = 'no';
   f.data.project.link = { repo: 'Excess' };
   await assert.rejects(f.platform.preflight(), /auto-deployment/);
+});
+
+test('startup baseline patches only the known startup command and preflight refuses migration-applying startup', async () => {
+  const f = providerFixture();
+  await f.platform.requireGreenCi(f.sha);
+  f.data.service.serviceDetails.envSpecificDetails.startCommand =
+    'DATABASE_URL="$DATABASE_URL_UNPOOLED" corepack pnpm db:deploy && corepack pnpm --filter @excess/api start';
+  await assert.rejects(f.platform.preflight(), /migration status/);
+  await f.platform.configureStartup();
+  await f.platform.preflight();
+  const change = f.requests.find(
+    (request) => request.options.method === 'PATCH',
+  );
+  assert.deepEqual(JSON.parse(change.options.body), {
+    serviceDetails: {
+      envSpecificDetails: { startCommand: config.renderStartCommand },
+    },
+  });
+  f.data.service.serviceDetails.envSpecificDetails.startCommand = 'unknown';
+  await assert.rejects(f.platform.configureStartup(), /Unknown/);
 });
 
 test('staging does not depend on CLI stdout envelopes and fails closed without a uniquely tagged build', async () => {

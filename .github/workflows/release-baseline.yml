@@ -1,0 +1,40 @@
+name: Prepare safe release baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: excess-production-release
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    if: github.repository == 'Shreyas2004wagh/Excess' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Configure read-only migration check and deploy the CI-verified unchanged app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          AUTOMATION_ENABLED: ${{ vars.RELEASE_AUTOMATION_ENABLED }}
+        run: node ops/release/baseline.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baseline-state
+          path: release-output/baseline-state.json
+          if-no-files-found: ignore
