@@ -123,8 +123,39 @@ jobs:
           pnpm exec eslint ops/release/*.mjs
           pnpm test:release
 
+      - name: Test backup safety guards
+        run: |
+          pnpm exec eslint ops/backup/*.mjs
+          pnpm test:backup
+
       - name: Build production API image
         run: docker build --file Dockerfile --tag excess-api:ci .
 
       - name: Validate k6 load profile
         run: docker run --rm -i grafana/k6:latest inspect - < ops/load/api.js
+
+  database-recovery:
+    # Synthetic fixtures only. No hosted DB URL, encryption identity or Clerk
+    # credentials are available to this job (including pull requests).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install recovery tools
+        uses: ./.github/actions/backup-tools
+
+      - name: Test encrypted exports and real isolated restores
+        run: |
+          node --test ops/backup/*.test.mjs
+          node --test ops/backup/recovery.integration.mjs

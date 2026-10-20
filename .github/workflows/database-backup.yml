@@ -1,0 +1,66 @@
+name: Encrypted database backup
+
+# Manual-only until an operator approves retention/storage and a cadence.
+# No private decryption key is needed or accepted by this workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: excess-database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    if: github.repository == 'Shreyas2004wagh/Excess' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: database-backup
+    steps:
+      - name: Require explicit operator activation
+        env:
+          BACKUPS_ENABLED: ${{ vars.BACKUPS_ENABLED }}
+        run: test "$BACKUPS_ENABLED" = 'true'
+
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install recovery tools
+        uses: ./.github/actions/backup-tools
+
+      - name: Create encrypted export and encrypted verification manifest
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+        run: node ops/backup/cli.mjs create
+
+      - name: Retain only completed encrypted backup files
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-database-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            backup-output/excess-backup-*/database.dump.age
+            backup-output/excess-backup-*/manifest.json.age
+            backup-output/excess-backup-*/COMPLETE
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Explain failure without exposing data or credentials
+        if: failure()
+        run: |
+          echo '## Backup failed' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No successful backup is claimed. Check configuration and prerequisites; see docs/backups.md. Keep Actions failure notifications enabled. No live database restore was attempted.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove encrypted workspace output
+        if: always()
+        run: |
+          node --input-type=module -e 'import {rm} from "node:fs/promises"; await rm("backup-output", {recursive:true,force:true});'

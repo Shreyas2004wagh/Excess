@@ -1,0 +1,17 @@
+name: Database recovery tools
+description: Install PostgreSQL 17 clients and age on Ubuntu 24.04
+runs:
+  using: composite
+  steps:
+    - name: Install encryption and the official PostgreSQL client
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends age curl ca-certificates
+        sudo install -d /usr/share/postgresql-common/pgdg
+        curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
+        printf '%s\n' 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/excess-pgdg.list > /dev/null
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends postgresql-client-17
+        echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
