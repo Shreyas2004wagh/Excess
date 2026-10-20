@@ -11,3 +11,9 @@ test-results
 .env.*
 release-output
 release-input
+backup-output
+restore-output
+**/*.age
+**/*.agekey
+**/*.dump
+**/*.backup

@@ -4,3 +4,9 @@ coverage
 dist
 node_modules
 pnpm-lock.yaml
+backup-output
+restore-output
+**/*.age
+**/*.agekey
+**/*.dump
+**/*.backup

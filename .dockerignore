@@ -8,3 +8,10 @@
 .env
 apps/web/.env.local
 coverage
+backup-output
+restore-output
+**/*.age
+**/*.agekey
+**/*.dump
+**/*.backup
+.env.*
