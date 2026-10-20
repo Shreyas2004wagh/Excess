@@ -87,6 +87,8 @@ For an existing database, pause application writes, export with `pg_dump -Fc`, r
 
 Keep exports outside the public repository with restricted permissions. Retain the source until verification succeeds. A retained source is a point-in-time rollback option, not a replica of new writes after cutover.
 
+For ongoing recovery, use the [encrypted backup and isolated restore runbook](backups.md), not an unencrypted dump artifact. The manual backup workflow is opt-in and has no active schedule; storage/retention, a direct backup credential, an operator-owned public recipient, and a real restore drill must be configured before relying on it. Deployment rollback never restores database data.
+
 ## Verification and limitations
 
 Check `/api/v1/health/ready` for database, Redis, and market-data readiness. Verify anonymous dashboard redirects, authenticated bootstrap, balance and opening ledger credit, portfolio/trade history, a live WebSocket feed, and refresh persistence. Use a dedicated test identity; any test trade must use virtual funds only.

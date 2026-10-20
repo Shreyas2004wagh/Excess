@@ -132,6 +132,8 @@ GitHub Actions runs formatting, lint, types, unit/integration tests, production 
 
 Release automation has its own deterministic safety tests: `corepack pnpm test:release`. Once enabled, the separate Release workflow deploys only green, current `main` commits, verifies hosted readiness/auth protection, and attempts a checked rollback on failure. See the [activation and recovery guide](docs/releases.md); it requires two hosting tokens stored as GitHub secrets and an explicit activation variable.
 
+Database recovery has separate safety checks: `corepack pnpm test:backup` and `corepack pnpm test:backup:integration` (PostgreSQL 17 clients, age, and Docker required for the latter). The integration test uses synthetic data and a disconnected disposable restore database. See the [encrypted backup and recovery runbook](docs/backups.md) for key custody, the manual opt-in export workflow, retention limits, and recovery validation. Live backups and recurring scheduling still require operator configuration; no plaintext database artifacts or private recovery keys are uploaded.
+
 ## Deployment
 
 The verified demo uses **Vercel for Next.js**, **Render for the NestJS API and Redis-compatible Key Value**, and **Neon for PostgreSQL**. Existing account, ledger, order, trade, and position data was preserved during the database migration.
