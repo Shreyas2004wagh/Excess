@@ -73,6 +73,15 @@ test('localhost fixture does not require TLS', () => {
   );
 });
 
+test('Neon channel binding is preserved in the libpq environment', () => {
+  const env = sourceEnvironment(`${direct}&channel_binding=require`);
+  assert.equal(env.PGCHANNELBINDING, 'require');
+  assert.equal(env.PGSSLMODE, 'require');
+  assert.throws(() =>
+    sourceEnvironment(`${direct}&channel_binding=unexpected`),
+  );
+});
+
 test('encryption supports native public recipients only', () => {
   assert.equal(validateRecipient(recipient), recipient);
   for (const invalid of [
@@ -90,6 +99,18 @@ test('snapshot identifiers cannot inject SQL', () => {
   assert.match(snapshotTransaction('00000003-0000001B-1'), /READ ONLY/);
   assert.throws(() => snapshotTransaction("x'; DROP TABLE users; --"));
   assert.equal(quoteIdentifier('x"y'), '"x""y"');
+});
+
+test('timeouts and formatting are transaction-local and snapshot import is first', () => {
+  const sql = snapshotTransaction('00000003-0000001B-1');
+  assert.match(sql, /SET LOCAL statement_timeout = '120000'/);
+  assert.match(sql, /SET LOCAL lock_timeout = '5000'/);
+  assert.match(sql, /SET LOCAL idle_in_transaction_session_timeout = '600000'/);
+  assert.ok(sql.indexOf('SET TRANSACTION SNAPSHOT') < sql.indexOf('SET LOCAL'));
+  assert.equal(
+    sourceEnvironment(direct).PGOPTIONS,
+    '-c default_transaction_read_only=on',
+  );
 });
 
 test('inventory requires all core financial tables, history, supported version and schema', () => {

@@ -17,8 +17,18 @@ export const requiredTables = [
   'User',
   '_prisma_migrations',
 ];
-export const pgOptions =
-  '-c statement_timeout=120000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=600000 -c default_transaction_read_only=on -c timezone=UTC -c datestyle=ISO -c extra_float_digits=3 -c bytea_output=hex -c client_encoding=UTF8';
+// Some managed proxies reject timeout GUCs in the startup packet. Keep the
+// read-only default enforced there, and scope all other settings to the SQL
+// transaction below; never fall back to a writable source connection.
+export const pgOptions = '-c default_transaction_read_only=on';
+const transactionSettings = `SET LOCAL statement_timeout = '120000';
+SET LOCAL lock_timeout = '5000';
+SET LOCAL idle_in_transaction_session_timeout = '600000';
+SET LOCAL timezone = 'UTC';
+SET LOCAL datestyle = 'ISO';
+SET LOCAL extra_float_digits = 3;
+SET LOCAL bytea_output = 'hex';
+SET LOCAL client_encoding = 'UTF8';\n`;
 export const psqlArgs = [
   '--no-psqlrc',
   '--quiet',
@@ -38,6 +48,7 @@ export function sourceEnvironment(value) {
       'schema',
       'connection_limit',
       'pool_timeout',
+      'channel_binding',
     ]);
     if (
       !['postgres:', 'postgresql:'].includes(url.protocol) ||
@@ -50,6 +61,10 @@ export function sourceEnvironment(value) {
       [...url.searchParams.keys()].some((key) => !allowed.has(key)) ||
       (url.searchParams.has('schema') &&
         url.searchParams.get('schema') !== 'public') ||
+      (url.searchParams.has('channel_binding') &&
+        !['require', 'prefer', 'disable'].includes(
+          url.searchParams.get('channel_binding'),
+        )) ||
       (!local &&
         !['require', 'verify-full'].includes(url.searchParams.get('sslmode')))
     )
@@ -81,6 +96,9 @@ export function sourceEnvironment(value) {
       ...fields,
       PGSSLMODE: url.searchParams.get('sslmode') || 'disable',
       PGCONNECT_TIMEOUT: '15',
+      ...(url.searchParams.has('channel_binding')
+        ? { PGCHANNELBINDING: url.searchParams.get('channel_binding') }
+        : {}),
       PGAPPNAME: 'excess-encrypted-backup',
       PGOPTIONS: pgOptions,
     };
@@ -98,7 +116,7 @@ export function pgBinary(name, directory = process.env.BACKUP_PG_BIN_DIR) {
 export function snapshotTransaction(snapshot) {
   if (snapshot && !/^[0-9A-F]+-[0-9A-F]+-\d+$/i.test(snapshot))
     throw new Error('Invalid snapshot identifier');
-  return `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n${snapshot ? `SET TRANSACTION SNAPSHOT '${snapshot}';\n` : ''}`;
+  return `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n${snapshot ? `SET TRANSACTION SNAPSHOT '${snapshot}';\n` : ''}${transactionSettings}`;
 }
 
 export async function openSnapshot(env) {
@@ -118,6 +136,11 @@ export async function openSnapshot(env) {
         throw new Error('Snapshot session ended early');
       }),
     ]);
+    if (result.done) {
+      // Preserve the sanitized connection failure, not JSON.parse(undefined).
+      await task.done;
+      throw new Error('Snapshot session ended before exporting metadata');
+    }
     const snapshot = JSON.parse(result.value);
     const id = snapshot.id;
     if (
