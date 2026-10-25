@@ -7,6 +7,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -172,6 +173,10 @@ test(
             '10006.8765432101',
           );
           for (const file of ['database.dump.age', 'manifest.json.age']) {
+            assert.equal(
+              (await stat(join(backup.directory, file))).mode & 0o777,
+              0o600,
+            );
             const contents = await readFile(join(backup.directory, file));
             assert.equal(
               contents.subarray(0, 22).toString(),
@@ -200,6 +205,20 @@ test(
           restoreDrill({ directory: backup.directory, identity: wrong }),
         );
       });
+
+      await t.test(
+        'authentication failure is reported safely and removes partial output',
+        async () => {
+          const root = join(temporary, 'authentication-failure');
+          const invalid = new URL(url);
+          invalid.password = 'wrong-synthetic-password';
+          await assert.rejects(
+            createBackup({ url: invalid.href, recipient, outputRoot: root }),
+            /Snapshot session failed/,
+          );
+          assert.deepEqual(await readdir(root), []);
+        },
+      );
 
       await t.test(
         'missing completion marker and damaged ciphertext are rejected',

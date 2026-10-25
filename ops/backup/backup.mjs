@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, lstat, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, lstat, rm, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -131,6 +131,7 @@ export async function createBackup({
         label: 'Manifest encryption',
       },
     );
+    await chmod(join(directory, 'manifest.json.age'), 0o600);
     await session.close();
     session = undefined;
     await writeFile(join(directory, 'COMPLETE'), `${id}\n`, {
