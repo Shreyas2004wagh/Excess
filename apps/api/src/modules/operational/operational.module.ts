@@ -1,8 +1,8 @@
 import { Global, Module } from '@nestjs/common';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 
 import { RateLimitGuard } from './rate-limit.guard.js';
-import { RequestLoggingInterceptor } from './request-logging.interceptor.js';
+import { SafeHttpExceptionFilter } from './safe-http-exception.filter.js';
 import { MetricsController } from './metrics.controller.js';
 import { MetricsService } from './metrics.service.js';
 
@@ -16,8 +16,8 @@ import { MetricsService } from './metrics.service.js';
       useClass: RateLimitGuard,
     },
     {
-      provide: APP_INTERCEPTOR,
-      useClass: RequestLoggingInterceptor,
+      provide: APP_FILTER,
+      useClass: SafeHttpExceptionFilter,
     },
   ],
   exports: [MetricsService],

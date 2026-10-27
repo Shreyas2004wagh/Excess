@@ -20,6 +20,7 @@ describe('MetricsController', () => {
   } as unknown as ConfigService;
   const response = {
     type: jest.fn(),
+    setHeader: jest.fn(),
   } as unknown as Response;
   const controller = new MetricsController(
     database,
@@ -39,6 +40,10 @@ describe('MetricsController', () => {
     ).resolves.toContain('excess_process_uptime_seconds');
     expect(response.type).toHaveBeenCalledWith(
       'text/plain; version=0.0.4; charset=utf-8',
+    );
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'Cache-Control',
+      'no-store',
     );
   });
 });

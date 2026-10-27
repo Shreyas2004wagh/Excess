@@ -13,8 +13,28 @@ function labels(values: Record<string, string>) {
   return `{${entries.join(',')}}`;
 }
 
+const httpMethods = new Set([
+  'GET',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'OPTIONS',
+  'HEAD',
+  'TRACE',
+  'CONNECT',
+]);
+
+export function normalizeHttpMethod(method: string) {
+  const upper = method.toUpperCase();
+  return httpMethods.has(upper) ? upper : 'OTHER';
+}
+
 @Injectable()
 export class MetricsService {
+  private readonly processStartedAt = Math.floor(
+    performance.timeOrigin / 1_000,
+  );
   private readonly httpRequests = new Map<string, number>();
   private readonly httpDurationCount = new Map<string, number>();
   private readonly httpDurationSeconds = new Map<string, number>();
@@ -22,14 +42,20 @@ export class MetricsService {
   private readonly emailAttempts = new Map<string, number>();
 
   observeHttpRequest(method: string, statusCode: number, durationMs: number) {
-    const normalizedMethod = method.toUpperCase();
-    this.increment(this.httpRequests, `${normalizedMethod}|${statusCode}`);
-    this.increment(this.httpDurationCount, normalizedMethod);
+    const normalizedMethod = normalizeHttpMethod(method);
+    const normalizedStatus =
+      Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599
+        ? statusCode
+        : 500;
+    const seconds = Number.isFinite(durationMs)
+      ? Math.max(0, durationMs) / 1_000
+      : 0;
     this.increment(
-      this.httpDurationSeconds,
-      normalizedMethod,
-      durationMs / 1_000,
+      this.httpRequests,
+      `${normalizedMethod}|${normalizedStatus}`,
     );
+    this.increment(this.httpDurationCount, normalizedMethod);
+    this.increment(this.httpDurationSeconds, normalizedMethod, seconds);
   }
 
   recordOutboxDispatch(result: 'published' | 'failed') {
@@ -45,6 +71,9 @@ export class MetricsService {
       '# HELP excess_process_uptime_seconds Process uptime in seconds.',
       '# TYPE excess_process_uptime_seconds gauge',
       `excess_process_uptime_seconds ${process.uptime()}`,
+      '# HELP excess_process_start_time_seconds Process start Unix timestamp.',
+      '# TYPE excess_process_start_time_seconds gauge',
+      `excess_process_start_time_seconds ${this.processStartedAt}`,
       '# HELP excess_process_resident_memory_bytes Resident memory in bytes.',
       '# TYPE excess_process_resident_memory_bytes gauge',
       `excess_process_resident_memory_bytes ${process.memoryUsage().rss}`,

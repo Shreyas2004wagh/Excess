@@ -1,4 +1,4 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, Header, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { Public } from '../auth/public.decorator.js';
@@ -10,6 +10,7 @@ export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
   @Get()
+  @Header('Cache-Control', 'no-store')
   @Public()
   @SkipRateLimit()
   getHealth() {
@@ -17,6 +18,7 @@ export class HealthController {
   }
 
   @Get('ready')
+  @Header('Cache-Control', 'no-store')
   @Public()
   @SkipRateLimit()
   async getReadiness(@Res({ passthrough: true }) response: Response) {

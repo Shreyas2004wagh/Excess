@@ -31,6 +31,7 @@ export class MetricsController {
     @Res({ passthrough: true }) response: Response,
   ) {
     this.authorize(authorization);
+    response.setHeader('Cache-Control', 'no-store');
     const [
       pending,
       processing,

@@ -23,5 +23,20 @@ describe('MetricsService', () => {
     expect(output).toContain(
       'excess_notification_email_deliveries{status="SENT"} 2',
     );
+    expect(output).toMatch(/excess_process_start_time_seconds \d+/);
+  });
+
+  it('bounds method/status labels and rejects invalid duration values', () => {
+    const metrics = new MetricsService();
+    metrics.observeHttpRequest('private-secret-method', 999, Number.NaN);
+    const output = metrics.render({
+      outbox: { PENDING: 0, PROCESSING: 0, PUBLISHED: 0, FAILED: 0 },
+      email: { DISABLED: 0, PENDING: 0, SENT: 0, FAILED: 0 },
+    });
+    expect(output).toContain(
+      'excess_http_requests_total{method="OTHER",status="500"} 1',
+    );
+    expect(output).not.toContain('private-secret');
+    expect(output).not.toContain('NaN');
   });
 });
