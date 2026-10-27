@@ -13,6 +13,7 @@ release-output
 release-input
 backup-output
 restore-output
+monitor-output
 **/*.age
 **/*.agekey
 **/*.dump

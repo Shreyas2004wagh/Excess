@@ -1,0 +1,62 @@
+name: Operational monitoring
+
+on:
+  schedule:
+    # Low-frequency operational checks, not a keep-alive for the free service.
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      notification_test:
+        description: 'Intentionally fail a synthetic check to verify GitHub notifications; no live requests'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: excess-operational-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: >-
+      github.repository == 'Shreyas2004wagh/Excess' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || vars.MONITORING_ENABLED == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check availability, authentication and protected error metrics
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MONITOR_METRICS_BEARER_TOKEN: ${{ secrets.MONITOR_METRICS_BEARER_TOKEN }}
+          MONITOR_REQUIRE_METRICS: ${{ vars.MONITOR_REQUIRE_METRICS || 'false' }}
+          MONITOR_NOTIFICATION_TEST: ${{ inputs.notification_test }}
+        run: |
+          if [ "$MONITOR_NOTIFICATION_TEST" = 'true' ]; then
+            node ops/monitor/cli.mjs --test-notification
+          elif [ "$MONITOR_REQUIRE_METRICS" = 'false' ]; then
+            node ops/monitor/cli.mjs --availability-only
+          else
+            node ops/monitor/cli.mjs
+          fi
+
+      - name: Preserve sanitized operational report even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-report
+          path: monitor-output/monitor-report.json
+          if-no-files-found: warn
+          retention-days: 14

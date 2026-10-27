@@ -10,6 +10,7 @@ apps/web/.env.local
 coverage
 backup-output
 restore-output
+monitor-output
 **/*.age
 **/*.agekey
 **/*.dump

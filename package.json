@@ -16,6 +16,8 @@
     "test:release": "node --test ops/release/*.test.mjs",
     "test:backup": "node --test ops/backup/*.test.mjs",
     "test:backup:integration": "node --test ops/backup/recovery.integration.mjs",
+    "test:monitor": "node --test ops/monitor/*.test.mjs",
+    "monitor:check": "node ops/monitor/cli.mjs",
     "backup:create": "node ops/backup/cli.mjs create",
     "backup:drill": "node ops/backup/cli.mjs drill",
     "typecheck": "turbo run typecheck",

@@ -128,6 +128,11 @@ jobs:
           pnpm exec eslint ops/backup/*.mjs
           pnpm test:backup
 
+      - name: Test operational monitoring without hosted credentials
+        run: |
+          pnpm exec eslint ops/monitor/*.mjs
+          pnpm test:monitor
+
       - name: Build production API image
         run: docker build --file Dockerfile --tag excess-api:ci .
 

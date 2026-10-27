@@ -6,6 +6,7 @@ node_modules
 pnpm-lock.yaml
 backup-output
 restore-output
+monitor-output
 **/*.age
 **/*.agekey
 **/*.dump
