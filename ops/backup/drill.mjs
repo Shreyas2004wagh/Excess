@@ -17,6 +17,17 @@ import { assertNotInterrupted, run } from './process.mjs';
 
 export const drillImage = 'postgres:17-alpine';
 
+export function readinessArguments(name) {
+  return [
+    'exec',
+    name,
+    'pg_isready',
+    '--host=127.0.0.1',
+    '--username=drill',
+    '--dbname=drill',
+  ];
+}
+
 export function validateDockerEndpoint(contexts) {
   const endpoint =
     contexts?.length === 1 ? contexts[0].Endpoints?.docker?.Host : undefined;
@@ -247,7 +258,9 @@ export async function restoreDrill({ directory, identity } = {}) {
     for (let attempt = 0; attempt < 120; attempt++) {
       try {
         await docker(
-          ['exec', name, 'pg_isready', '--username=drill', '--dbname=drill'],
+          // The image's temporary initialization server listens only on the
+          // Unix socket. TCP becomes ready only after initialization finishes.
+          readinessArguments(name),
           { label: 'Disposable PostgreSQL readiness', timeout: 5000 },
         );
         ready = true;

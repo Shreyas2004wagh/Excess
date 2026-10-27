@@ -16,7 +16,13 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import test from 'node:test';
 import { createBackup, fileDigest, repositoryRoot } from './backup.mjs';
 import { pgBinary, psqlArgs, sourceEnvironment } from './database.mjs';
-import { decryptManifest, restoreDrill } from './drill.mjs';
+import {
+  containerArguments,
+  decryptManifest,
+  readinessArguments,
+  removeOwnedContainer,
+  restoreDrill,
+} from './drill.mjs';
 import { run } from './process.mjs';
 
 test(
@@ -341,6 +347,84 @@ test(
       } finally {
         await rm(temporary, { recursive: true, force: true });
       }
+    }
+  },
+);
+
+test(
+  'TCP readiness rejects the temporary Unix-socket-only initialization server',
+  { timeout: 60000 },
+  async () => {
+    const owner = randomUUID();
+    const name = `excess-restore-${owner}`;
+    const args = containerArguments(name, owner);
+    args.splice(args.length - 1, 0, '--entrypoint', '/bin/sh');
+    args.push(
+      '-ec',
+      `
+    initdb -D "$PGDATA" --username=drill --auth=trust > /dev/null 2>&1
+    pg_ctl -D "$PGDATA" -o "-c listen_addresses=''" -w start > /dev/null 2>&1
+    createdb --username=drill drill
+    touch /tmp/initialization-socket-ready
+    while [ ! -f /tmp/start-final-server ]; do sleep 0.1; done
+    pg_ctl -D "$PGDATA" -m fast -w stop > /dev/null 2>&1
+    exec postgres -D "$PGDATA"
+  `,
+    );
+    let started = false;
+    try {
+      await run('docker', args, {
+        label: 'Synthetic initialization race fixture',
+      });
+      started = true;
+      let temporaryReady = false;
+      for (let attempt = 0; attempt < 120; attempt++) {
+        try {
+          await run('docker', [
+            'exec',
+            name,
+            'test',
+            '-f',
+            '/tmp/initialization-socket-ready',
+          ]);
+          temporaryReady = true;
+          break;
+        } catch {
+          await sleep(100);
+        }
+      }
+      assert.ok(temporaryReady);
+      await run('docker', [
+        'exec',
+        name,
+        'pg_isready',
+        '--username=drill',
+        '--dbname=drill',
+      ]);
+      await assert.rejects(run('docker', readinessArguments(name)));
+      await run('docker', ['exec', name, 'touch', '/tmp/start-final-server']);
+      let finalReady = false;
+      for (let attempt = 0; attempt < 120; attempt++) {
+        try {
+          await run('docker', readinessArguments(name));
+          finalReady = true;
+          break;
+        } catch {
+          await sleep(100);
+        }
+      }
+      assert.ok(finalReady);
+      await run('docker', [
+        'exec',
+        name,
+        'psql',
+        ...psqlArgs,
+        '--username=drill',
+        '--dbname=drill',
+        '--command=DROP SCHEMA public;',
+      ]);
+    } finally {
+      if (started) await removeOwnedContainer(name, owner);
     }
   },
 );

@@ -15,6 +15,7 @@ import {
 } from './database.mjs';
 import {
   containerArguments,
+  readinessArguments,
   removeOwnedContainer,
   validateDockerEndpoint,
   validateIdentity,
@@ -236,6 +237,12 @@ test('restore refuses remote Docker daemons and binds to a local Unix socket', (
     'unix://relative',
   ])
     assert.throws(() => validateDockerEndpoint(contexts(endpoint)));
+});
+
+test('restore readiness waits for the final TCP server, not the temporary init socket', () => {
+  const args = readinessArguments('disposable-fixture');
+  assert.ok(args.includes('--host=127.0.0.1'));
+  assert.ok(args.includes('--dbname=drill'));
 });
 
 test('cleanup rejects an unrelated target before invoking Docker', async () => {
