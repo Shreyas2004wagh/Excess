@@ -93,6 +93,8 @@ For ongoing recovery, use the [encrypted backup and isolated restore runbook](ba
 
 Check `/api/v1/health/ready` for database, Redis, and market-data readiness. Verify anonymous dashboard redirects, authenticated bootstrap, balance and opening ledger credit, portfolio/trade history, a live WebSocket feed, and refresh persistence. Use a dedicated test identity; any test trade must use virtual funds only.
 
+See the [operational monitoring runbook](monitoring.md) for hourly availability checks, cold-start handling, opt-in GitHub notifications, HTTP error telemetry and their limitations. The monitor is read-only and does not modify Render's health-check path or restart services. Availability-only is the initial hosted mode; protected error-rate scrapes remain a separate opt-in.
+
 After the Neon migration, all 12 public tables matched source row counts and content hashes, all eight migrations were recognized, and the existing 0.001 BTC position and trade were preserved. Hosted authentication, account/ledger/portfolio/trade endpoints, live prices, and refresh passed smoke checks.
 
 Known demo limitations:

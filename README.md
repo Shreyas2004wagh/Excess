@@ -134,6 +134,8 @@ Release automation has its own deterministic safety tests: `corepack pnpm test:r
 
 Database recovery has separate safety checks: `corepack pnpm test:backup` and `corepack pnpm test:backup:integration` (PostgreSQL 17 clients, age, and Docker required for the latter). The integration test uses synthetic data and a disconnected disposable restore database. See the [encrypted backup and recovery runbook](docs/backups.md) for key custody, the manual opt-in export workflow, retention limits, and recovery validation. Live backups and recurring scheduling still require operator configuration; no plaintext database artifacts or private recovery keys are uploaded.
 
+Operational checks use `corepack pnpm monitor:check --availability-only`; deterministic checks use `corepack pnpm test:monitor`. The opt-in hourly workflow verifies API dependencies, frontend availability and anonymous-access protection with a bounded cold-start allowance. [The monitoring runbook](docs/monitoring.md) explains activation, GitHub failure-notification testing, sanitized reports, private HTTP telemetry, and optional authenticated error-rate coverage. Scheduling and external error-rate alerts are not silently activated.
+
 ## Deployment
 
 The verified demo uses **Vercel for Next.js**, **Render for the NestJS API and Redis-compatible Key Value**, and **Neon for PostgreSQL**. Existing account, ledger, order, trade, and position data was preserved during the database migration.
